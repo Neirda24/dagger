@@ -18,6 +18,7 @@ final readonly class DaggerField
         public string $name,
         public ?string $description,
         public ListOfType|Type $type,
+        public ?string $deprecated = null,
     ) {
     }
 
@@ -44,9 +45,13 @@ final readonly class DaggerField
             ?->newInstance()
             ?->description;
 
+        $deprecatedAttribute = (current($field
+            ->getAttributes(Attribute\Deprecated::class)) ?: null)
+            ?->newInstance();
+
         $type = self::getType($field);
 
-        return new self($field->name, $description, $type);
+        return new self($field->name, $description, $type, $deprecatedAttribute?->reason);
     }
 
     private static function getType(ReflectionProperty $field): ListOfType|Type

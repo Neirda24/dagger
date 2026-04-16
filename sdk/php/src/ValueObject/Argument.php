@@ -23,6 +23,8 @@ final readonly class Argument
         public ?Json $default = null,
         public ?string $defaultPath = null,
         public ?array $ignore = null,
+        public ?string $deprecated = null,
+        public ?string $defaultAddress = null,
     ) {
         if (!$type->nullable && $this->default == new Json('null')) {
             throw new RuntimeException(sprintf(
@@ -54,6 +56,14 @@ final readonly class Argument
             ->getAttributes(Attribute\Ignore::class)) ?: null)
             ?->newInstance();
 
+        $deprecatedAttribute = (current($parameter
+            ->getAttributes(Attribute\Deprecated::class)) ?: null)
+            ?->newInstance();
+
+        $defaultAddressAttribute = (current($parameter
+            ->getAttributes(Attribute\DefaultAddress::class)) ?: null)
+            ?->newInstance();
+
         return new self(
             name: $parameter->name,
             description: $description ?? '',
@@ -61,6 +71,8 @@ final readonly class Argument
             default: self::getDefault($parameter),
             defaultPath: $defaultPathAttribute?->path,
             ignore: $ignoreAttribute?->ignore,
+            deprecated: $deprecatedAttribute?->reason,
+            defaultAddress: $defaultAddressAttribute?->address,
         );
     }
 

@@ -68,6 +68,7 @@ class EntrypointCommand extends Command
                     $daggerField->name,
                     $this->getTypeDef($daggerField->type),
                     $daggerField->description,
+                    deprecated: $daggerField->deprecated,
                 );
             }
 
@@ -81,6 +82,10 @@ class EntrypointCommand extends Command
                     $func = $func->withDescription($daggerFunction->description);
                 }
 
+                if ($daggerFunction->deprecated !== null) {
+                    $func = $func->withDeprecated($daggerFunction->deprecated);
+                }
+
                 foreach ($daggerFunction->arguments as $argument) {
                     $func = $func->withArg(
                         name: $argument->name,
@@ -91,6 +96,8 @@ class EntrypointCommand extends Command
                         defaultValue: $argument->default,
                         defaultPath: $argument->defaultPath,
                         ignore: $argument->ignore,
+                        deprecated: $argument->deprecated,
+                        defaultAddress: $argument->defaultAddress,
                     );
                 }
 

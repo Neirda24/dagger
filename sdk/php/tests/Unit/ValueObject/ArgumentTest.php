@@ -6,11 +6,14 @@ namespace Dagger\Tests\Unit\ValueObject;
 
 use Dagger\Attribute\DaggerFunction;
 use Dagger\Attribute\DaggerObject;
+use Dagger\Attribute\DefaultAddress;
+use Dagger\Attribute\Deprecated;
 use Dagger\Container;
 use Dagger\Exception\RegistrationError\MissingAttribute;
 use Dagger\File;
 use Dagger\Json;
 use Dagger\Tests\Unit\Fixture\DaggerObjectWithDaggerFunctions;
+use Dagger\Tests\Unit\Fixture\DaggerObjectWithDeprecations;
 use Dagger\ValueObject\Argument;
 use Dagger\ValueObject\Type;
 use Generator;
@@ -177,6 +180,41 @@ class ArgumentTest extends TestCase
                 'fileWithDefaultPath',
                 'value',
             )
+        ];
+
+        yield 'deprecated argument' => [
+            new Argument(
+                'label',
+                '',
+                new Type('string', true),
+                new Json('null'),
+                null,
+                null,
+                'Use name instead',
+            ),
+            self::getReflectionParameter(
+                DaggerObjectWithDeprecations::class,
+                'methodWithDeprecatedArg',
+                'label',
+            ),
+        ];
+
+        yield 'Container with default address' => [
+            new Argument(
+                'ctr',
+                '',
+                new Type(Container::class, false),
+                null,
+                null,
+                null,
+                null,
+                'alpine:latest',
+            ),
+            self::getReflectionParameter(
+                DaggerObjectWithDeprecations::class,
+                'containerWithDefaultAddress',
+                'ctr',
+            ),
         ];
     }
 
