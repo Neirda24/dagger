@@ -32,6 +32,7 @@ class FindsDaggerObjectsTest extends TestCase
             [
                 Fixture\NoDaggerFunctions::getValueObjectEquivalent(),
                 Fixture\DaggerObjectWithDaggerFunctions::getValueObjectEquivalent(),
+                Fixture\DaggerObjectWithDeprecations::getValueObjectEquivalent(),
                 Fixture\Module\Field\MyModule::asValueObject(),
             ],
             __DIR__ . '/../Fixture',

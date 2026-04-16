@@ -10,6 +10,7 @@ use Dagger\Exception\RegistrationError\MissingAttribute;
 use Dagger\File;
 use Dagger\Json;
 use Dagger\Tests\Unit\Fixture\DaggerObjectWithDaggerFunctions;
+use Dagger\Tests\Unit\Fixture\DaggerObjectWithDeprecations;
 use Dagger\ValueObject\Argument;
 use Dagger\ValueObject\DaggerFunction;
 use Dagger\ValueObject\Type;
@@ -199,6 +200,47 @@ class DaggerFunctionTest extends TestCase
             new ReflectionMethod(
                 DaggerObjectWithDaggerFunctions::class,
                 'explicitlyOptionalFile',
+            ),
+        ];
+
+        yield 'deprecated function with reason' => [
+            new DaggerFunction(
+                'oldMethod',
+                null,
+                [],
+                new Type('string'),
+                'Use newMethod instead',
+            ),
+            new ReflectionMethod(
+                DaggerObjectWithDeprecations::class,
+                'oldMethod',
+            ),
+        ];
+
+        yield 'deprecated function without reason' => [
+            new DaggerFunction(
+                'deprecatedWithoutReason',
+                null,
+                [],
+                new Type('void'),
+                '',
+            ),
+            new ReflectionMethod(
+                DaggerObjectWithDeprecations::class,
+                'deprecatedWithoutReason',
+            ),
+        ];
+
+        yield 'non-deprecated function' => [
+            new DaggerFunction(
+                'newMethod',
+                null,
+                [],
+                new Type('string'),
+            ),
+            new ReflectionMethod(
+                DaggerObjectWithDeprecations::class,
+                'newMethod',
             ),
         ];
     }

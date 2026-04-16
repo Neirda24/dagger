@@ -20,6 +20,7 @@ final readonly class DaggerFunction
         public ?string $description,
         public array $arguments,
         public ListOfType|Type $returnType,
+        public ?string $deprecated = null,
     ) {
     }
 
@@ -49,6 +50,10 @@ final readonly class DaggerFunction
             ?->newInstance()
             ?->description;
 
+        $deprecatedAttribute = (current($method
+            ->getAttributes(Attribute\Deprecated::class)) ?: null)
+            ?->newInstance();
+
         $parameters = array_map(
             fn($p) => Argument::fromReflection($p),
             $method->getParameters(),
@@ -66,6 +71,7 @@ final readonly class DaggerFunction
                 description: $description,
                 arguments: $parameters,
                 returnType: self::getReturnType($method),
+                deprecated: $deprecatedAttribute?->reason,
             );
     }
 
