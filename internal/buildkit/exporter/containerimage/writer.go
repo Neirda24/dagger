@@ -15,6 +15,7 @@ import (
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/pkg/labels"
 	"github.com/containerd/platforms"
+	bksnapshots "github.com/dagger/dagger/engine/snapshots"
 	"github.com/dagger/dagger/internal/buildkit/cache"
 	cacheconfig "github.com/dagger/dagger/internal/buildkit/cache/config"
 	"github.com/dagger/dagger/internal/buildkit/exporter"
@@ -22,7 +23,6 @@ import (
 	"github.com/dagger/dagger/internal/buildkit/exporter/containerimage/exptypes"
 	"github.com/dagger/dagger/internal/buildkit/exporter/util/epoch"
 	"github.com/dagger/dagger/internal/buildkit/session"
-	"github.com/dagger/dagger/internal/buildkit/snapshot"
 	"github.com/dagger/dagger/internal/buildkit/solver"
 	"github.com/dagger/dagger/internal/buildkit/solver/result"
 	attestationTypes "github.com/dagger/dagger/internal/buildkit/util/attestation"
@@ -47,7 +47,7 @@ import (
 )
 
 type WriterOpt struct {
-	Snapshotter  snapshot.Snapshotter
+	Snapshotter  bksnapshots.Snapshotter
 	ContentStore content.Store
 	Applier      diff.Applier
 	Differ       diff.Comparer
@@ -655,7 +655,7 @@ func (ic *ImageWriter) ContentStore() content.Store {
 	return ic.opt.ContentStore
 }
 
-func (ic *ImageWriter) Snapshotter() snapshot.Snapshotter {
+func (ic *ImageWriter) Snapshotter() bksnapshots.Snapshotter {
 	return ic.opt.Snapshotter
 }
 

@@ -11,7 +11,7 @@ namespace Dagger;
 /**
  * The source needed to load and run a module, along with any metadata about the source such as versions/urls/etc.
  */
-class ModuleSource extends Client\AbstractObject implements Client\IdAble
+class ModuleSource extends Client\AbstractObject implements Client\IdAble, Node, Syncer
 {
     /**
      * Load the source as a module. If this is a local source, the parent directory must have been provided during module source creation
@@ -68,7 +68,7 @@ class ModuleSource extends Client\AbstractObject implements Client\IdAble
     }
 
     /**
-     * Whether an existing dagger.json for the module was found.
+     * Whether an existing module config file was found.
      */
     public function configExists(): bool
     {
@@ -161,10 +161,10 @@ class ModuleSource extends Client\AbstractObject implements Client\IdAble
     /**
      * A unique identifier for this ModuleSource.
      */
-    public function id(): ModuleSourceId
+    public function id(): Id
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('id');
-        return new \Dagger\ModuleSourceId((string)$this->queryLeaf($leafQueryBuilder, 'id'));
+        return new \Dagger\Id((string)$this->queryLeaf($leafQueryBuilder, 'id'));
     }
 
     /**
@@ -208,7 +208,7 @@ class ModuleSource extends Client\AbstractObject implements Client\IdAble
     }
 
     /**
-     * The original name of the module as read from the module's dagger.json (or set for the first time with the withName API).
+     * The original name of the module as read from the module config file (or set for the first time with the withName API).
      */
     public function moduleOriginalName(): string
     {
@@ -253,7 +253,7 @@ class ModuleSource extends Client\AbstractObject implements Client\IdAble
     }
 
     /**
-     * The path, relative to the context directory, that contains the module's dagger.json.
+     * The path, relative to the context directory, that contains the module config.
      */
     public function sourceRootSubpath(): string
     {
@@ -273,10 +273,11 @@ class ModuleSource extends Client\AbstractObject implements Client\IdAble
     /**
      * Forces evaluation of the module source, including any loading into the engine and associated validation.
      */
-    public function sync(): ModuleSourceId
+    public function sync(): ModuleSource
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('sync');
-        return new \Dagger\ModuleSourceId((string)$this->queryLeaf($leafQueryBuilder, 'sync'));
+        $this->queryLeaf($leafQueryBuilder, 'sync');
+        return $this;
     }
 
     /**
@@ -286,6 +287,17 @@ class ModuleSource extends Client\AbstractObject implements Client\IdAble
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('toolchains');
         return (array)$this->queryLeaf($leafQueryBuilder, 'toolchains');
+    }
+
+    /**
+     * The module's dagger.json with any in-memory edits from with* APIs applied, as a diff relative to the source's context directory.
+     *
+     * Unlike generatedContextDirectory, this does not run codegen and does not validate the engine version against the running engine, so it can be used to declare an engine requirement newer than the running engine. Loading or serving such a module still fails at moduleSource.asModule.
+     */
+    public function updatedConfigDirectory(): Directory
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('updatedConfigDirectory');
+        return new \Dagger\Directory($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
     /**
@@ -309,7 +321,7 @@ class ModuleSource extends Client\AbstractObject implements Client\IdAble
     /**
      * Set a blueprint for the module source.
      */
-    public function withBlueprint(ModuleSourceId|ModuleSource $blueprint): ModuleSource
+    public function withBlueprint(ModuleSource $blueprint): ModuleSource
     {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withBlueprint');
         $innerQueryBuilder->setArgument('blueprint', $blueprint);

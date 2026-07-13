@@ -18,6 +18,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/labels"
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/dagger/dagger/engine/slog"
+	bksnapshots "github.com/dagger/dagger/engine/snapshots"
 	"github.com/dagger/dagger/internal/buildkit/cache/config"
 	"github.com/dagger/dagger/internal/buildkit/client"
 	"github.com/dagger/dagger/internal/buildkit/identity"
@@ -27,7 +28,6 @@ import (
 	"github.com/dagger/dagger/internal/buildkit/util/bklog"
 	"github.com/dagger/dagger/internal/buildkit/util/compression"
 	"github.com/dagger/dagger/internal/buildkit/util/flightcontrol"
-	"github.com/dagger/dagger/internal/buildkit/util/leaseutil"
 	"github.com/dagger/dagger/internal/buildkit/util/overlay"
 	"github.com/dagger/dagger/internal/buildkit/util/progress"
 	rootlessmountopts "github.com/dagger/dagger/internal/buildkit/util/rootless/mountopts"
@@ -65,12 +65,6 @@ type ImmutableRef interface {
 	GetRemotes(ctx context.Context, createIfNeeded bool, cfg config.RefConfig, all bool, s session.Group) ([]*solver.Remote, error)
 	LayerChain() RefList
 	FileList(ctx context.Context, s session.Group) ([]string, error)
-	// EnsureLocal ensures that all layers in the ref's chain are stored in the
-	// local content store. This is needed for lazy blob refs whose descriptor
-	// handlers are session-scoped: if they are not materialized before the
-	// session closes, future cache lookups will fail because the handlers are
-	// gone and the blobs can't be fetched.
-	EnsureLocal(ctx context.Context, s session.Group) error
 }
 
 type MutableRef interface {
@@ -424,7 +418,7 @@ func (cr *cacheRecord) mount(ctx context.Context) (_ snapshot.Mountable, rerr er
 				"containerd.io/gc.flat": time.Now().UTC().Format(time.RFC3339Nano),
 			}
 			return nil
-		}, leaseutil.MakeTemporary); err != nil && !cerrdefs.IsAlreadyExists(err) {
+		}, bksnapshots.MakeTemporary); err != nil && !cerrdefs.IsAlreadyExists(err) {
 			return nil, err
 		}
 		defer func() {
@@ -1093,19 +1087,6 @@ func (sr *immutableRef) Extract(ctx context.Context, s session.Group) (rerr erro
 	return sr.unlazy(ctx, sr.descHandlers, sr.progress, s, true, false)
 }
 
-func (sr *immutableRef) EnsureLocal(ctx context.Context, s session.Group) error {
-	for _, ref := range sr.LayerChain() {
-		ir, ok := ref.(*immutableRef)
-		if !ok {
-			continue
-		}
-		if err := ir.unlazy(ctx, ir.descHandlers, ir.progress, s, true, true); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (sr *immutableRef) withRemoteSnapshotLabelsStargzMode(ctx context.Context, s session.Group, f func()) error {
 	dhs := sr.descHandlers
 	for _, r := range sr.layerChain() {
@@ -1149,7 +1130,7 @@ func (sr *immutableRef) withRemoteSnapshotLabelsStargzMode(ctx context.Context, 
 }
 
 func (sr *immutableRef) prepareRemoteSnapshotsStargzMode(ctx context.Context, s session.Group) error {
-	_, err := g.Do(ctx, sr.ID()+"-prepare-remote-snapshot", func(ctx context.Context) (_ *leaseutil.LeaseRef, rerr error) {
+	_, err := g.Do(ctx, sr.ID()+"-prepare-remote-snapshot", func(ctx context.Context) (_ *bksnapshots.LeaseRef, rerr error) {
 		dhs := sr.descHandlers
 		for _, r := range sr.layerChain() {
 			r := r
@@ -1246,7 +1227,7 @@ func makeTmpLabelsStargzMode(labels map[string]string, s session.Group) (fields 
 }
 
 func (sr *immutableRef) unlazy(ctx context.Context, dhs DescHandlers, pg progress.Controller, s session.Group, topLevel bool, ensureContentStore bool) error {
-	_, err := g.Do(ctx, sr.ID()+"-unlazy", func(ctx context.Context) (_ *leaseutil.LeaseRef, rerr error) {
+	_, err := g.Do(ctx, sr.ID()+"-unlazy", func(ctx context.Context) (_ *bksnapshots.LeaseRef, rerr error) {
 		if _, err := sr.cm.Snapshotter.Stat(ctx, sr.getSnapshotID()); err == nil {
 			if !ensureContentStore {
 				return nil, nil
@@ -1340,7 +1321,7 @@ func (sr *immutableRef) unlazyLayer(ctx context.Context, dhs DescHandlers, pg pr
 	}
 
 	if _, ok := leases.FromContext(ctx); !ok {
-		leaseCtx, done, err := leaseutil.WithLease(ctx, sr.cm.LeaseManager, leaseutil.MakeTemporary)
+		leaseCtx, done, err := bksnapshots.WithLease(ctx, sr.cm.LeaseManager, bksnapshots.MakeTemporary)
 		if err != nil {
 			return err
 		}

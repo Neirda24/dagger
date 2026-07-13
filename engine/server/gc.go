@@ -3,49 +3,36 @@ package server
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
-	"sync"
+	"time"
 
+	"github.com/dagger/dagger/dagql"
 	"github.com/dagger/dagger/engine/config"
 	bkclient "github.com/dagger/dagger/internal/buildkit/client"
 	bkconfig "github.com/dagger/dagger/internal/buildkit/cmd/buildkitd/config"
 	"github.com/dagger/dagger/internal/buildkit/util/bklog"
 	"github.com/dagger/dagger/internal/buildkit/util/disk"
-	"github.com/dagger/dagger/internal/buildkit/util/imageutil"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/dagger/dagger/core"
 )
 
-func (srv *Server) EngineLocalCachePolicy() *bkclient.PruneInfo {
+type dagqlCachePrunePolicy = dagql.CachePrunePolicy
+
+const (
+	localCacheSessionGCThrottle      = time.Minute
+	localCacheDiskPressureCheckEvery = 5 * time.Second
+	localCacheDiskPressureGCThrottle = 30 * time.Second
+)
+
+func (srv *Server) EngineLocalCachePolicy() *dagqlCachePrunePolicy {
 	return srv.workerDefaultGCPolicy
 }
 
 // Return all the cache entries in the local cache. No support for filtering yet.
 func (srv *Server) EngineLocalCacheEntries(ctx context.Context) (*core.EngineCacheEntrySet, error) {
-	du, err := srv.baseWorker.DiskUsage(ctx, bkclient.DiskUsageInfo{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get disk usage from worker: %w", err)
-	}
-
-	set := &core.EngineCacheEntrySet{}
-	for _, r := range du {
-		cacheEnt := &core.EngineCacheEntry{
-			Description:         r.Description,
-			DiskSpaceBytes:      int(r.Size),
-			ActivelyUsed:        r.InUse,
-			CreatedTimeUnixNano: int(r.CreatedAt.UnixNano()),
-			RecordType:          string(r.RecordType),
-		}
-		if r.LastUsedAt != nil {
-			cacheEnt.MostRecentUseTimeUnixNano = int(r.LastUsedAt.UnixNano())
-		}
-		set.EntriesList = append(set.EntriesList, cacheEnt)
-		set.DiskSpaceBytes += int(r.Size)
-	}
-	set.EntryCount = len(set.EntriesList)
-
-	return set, nil
+	entries := srv.engineCache.UsageEntriesAll(ctx)
+	return engineCacheEntrySetFromUsage(entries), nil
 }
 
 // Prune the local cache of releaseable entries. If UseDefaultPolicy is true,
@@ -55,66 +42,23 @@ func (srv *Server) PruneEngineLocalCacheEntries(ctx context.Context, opts core.E
 	srv.gcmu.Lock()
 	defer srv.gcmu.Unlock()
 
-	srv.daggerSessionsMu.RLock()
-	cancelLeases := len(srv.daggerSessions) == 0
-	srv.daggerSessionsMu.RUnlock()
-	if cancelLeases {
-		imageutil.CancelCacheLeases()
-	}
-
-	wg := &sync.WaitGroup{}
-	ch := make(chan bkclient.UsageInfo, 32)
-	var pruned []bkclient.UsageInfo
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for r := range ch {
-			pruned = append(pruned, r)
-		}
-	}()
-
 	dstat, _ := disk.GetDiskStat(srv.rootDir)
-	pruneOpts, err := resolveEngineLocalCachePruneOptions(srv.baseWorker.GCPolicy(), opts, dstat)
+	prunePolicies, err := resolveEngineLocalCachePrunePolicies(
+		srv.workerGCPolicies,
+		opts,
+		dstat,
+	)
 	if err != nil {
 		return nil, err
 	}
-	err = srv.baseWorker.Prune(ctx, ch, pruneOpts...)
+	report, err := srv.engineCache.Prune(ctx, prunePolicies)
 	if err != nil {
-		return nil, fmt.Errorf("worker failed to prune local cache: %w", err)
+		return nil, fmt.Errorf("failed to prune dagql cache: %w", err)
 	}
-	close(ch)
-	wg.Wait()
-
-	if len(pruned) == 0 {
+	if len(report.Entries) == 0 {
 		return &core.EngineCacheEntrySet{}, nil
 	}
-
-	if e, ok := srv.SolverCache.(interface {
-		ReleaseUnreferenced(context.Context) error
-	}); ok {
-		if err := e.ReleaseUnreferenced(ctx); err != nil {
-			bklog.G(ctx).Errorf("failed to release cache metadata: %+v", err)
-		}
-	}
-
-	set := &core.EngineCacheEntrySet{}
-	for _, r := range pruned {
-		// buildkit's Prune doesn't set RecordType currently, so can't include kind here
-		ent := &core.EngineCacheEntry{
-			Description:         r.Description,
-			DiskSpaceBytes:      int(r.Size),
-			CreatedTimeUnixNano: int(r.CreatedAt.UnixNano()),
-			ActivelyUsed:        r.InUse,
-		}
-		if r.LastUsedAt != nil {
-			ent.MostRecentUseTimeUnixNano = int(r.LastUsedAt.UnixNano())
-		}
-		set.EntriesList = append(set.EntriesList, ent)
-		set.DiskSpaceBytes += int(r.Size)
-	}
-	set.EntryCount = len(set.EntriesList)
-
-	return set, nil
+	return engineCacheEntrySetFromUsage(report.Entries), nil
 }
 
 func trimmedPruneOpts(opts core.EngineCachePruneOptions) (maxUsedSpace, reservedSpace, minFreeSpace, targetSpace string) {
@@ -124,23 +68,55 @@ func trimmedPruneOpts(opts core.EngineCachePruneOptions) (maxUsedSpace, reserved
 		strings.TrimSpace(opts.TargetSpace)
 }
 
-func resolveEngineLocalCachePruneOptions(defaultPolicy []bkclient.PruneInfo, opts core.EngineCachePruneOptions, dstat disk.DiskStat) ([]bkclient.PruneInfo, error) {
-	pruneOpts := []bkclient.PruneInfo{{All: true}}
+func engineCacheEntrySetFromUsage(entries []dagql.CacheUsageEntry) *core.EngineCacheEntrySet {
+	set := &core.EngineCacheEntrySet{}
+	for _, entry := range entries {
+		ent := &core.EngineCacheEntry{
+			Description:               entry.Description,
+			DiskSpaceBytes:            int(entry.SizeBytes),
+			CreatedTimeUnixNano:       int(entry.CreatedTimeUnixNano),
+			MostRecentUseTimeUnixNano: int(entry.MostRecentUseTimeUnixNano),
+			ActivelyUsed:              entry.ActivelyUsed,
+			RecordType:                entry.RecordType,
+			RecordTypes:               entry.RecordTypes,
+			DagqlCall:                 entry.DagqlCall,
+		}
+		set.EntriesList = append(set.EntriesList, ent)
+		set.DiskSpaceBytes += int(entry.SizeBytes)
+	}
+	set.EntryCount = len(set.EntriesList)
+	return set
+}
+
+func cloneDagqlCachePrunePolicies(in []dagqlCachePrunePolicy) []dagqlCachePrunePolicy {
+	out := make([]dagqlCachePrunePolicy, 0, len(in))
+	for _, policy := range in {
+		policy.Filters = slices.Clone(policy.Filters)
+		out = append(out, policy)
+	}
+	return out
+}
+
+func resolveEngineLocalCachePrunePolicies(defaultPolicy []dagqlCachePrunePolicy, opts core.EngineCachePruneOptions, dstat disk.DiskStat) ([]dagqlCachePrunePolicy, error) {
+	prunePolicies := []dagqlCachePrunePolicy{{All: true}}
 	if opts.UseDefaultPolicy && len(defaultPolicy) > 0 {
-		// Copy to avoid mutating the worker policy if per-call overrides are set.
-		pruneOpts = append([]bkclient.PruneInfo(nil), defaultPolicy...)
+		// Copy to avoid mutating the default policy if per-call overrides are set.
+		prunePolicies = cloneDagqlCachePrunePolicies(defaultPolicy)
 	}
 
 	maxUsedSpace, reservedSpace, minFreeSpace, targetSpace := trimmedPruneOpts(opts)
 	if maxUsedSpace != "" || reservedSpace != "" || minFreeSpace != "" || targetSpace != "" {
-		if err := applyEngineCachePruneSpaceOverrides(pruneOpts, dstat, maxUsedSpace, reservedSpace, minFreeSpace, targetSpace); err != nil {
+		if err := applyEngineCachePruneSpaceOverrides(prunePolicies, dstat, maxUsedSpace, reservedSpace, minFreeSpace, targetSpace); err != nil {
 			return nil, err
 		}
 	}
-	return pruneOpts, nil
+	for i := range prunePolicies {
+		prunePolicies[i].CurrentFreeSpace = dstat.Available
+	}
+	return prunePolicies, nil
 }
 
-func applyEngineCachePruneSpaceOverrides(pruneOpts []bkclient.PruneInfo, dstat disk.DiskStat, maxUsedSpace, reservedSpace, minFreeSpace, targetSpace string) error {
+func applyEngineCachePruneSpaceOverrides(prunePolicies []dagqlCachePrunePolicy, dstat disk.DiskStat, maxUsedSpace, reservedSpace, minFreeSpace, targetSpace string) error {
 	var (
 		maxUsedSpaceBytes  int64
 		hasMaxUsedSpace    bool
@@ -182,18 +158,18 @@ func applyEngineCachePruneSpaceOverrides(pruneOpts []bkclient.PruneInfo, dstat d
 		hasTargetSpace = true
 	}
 
-	for i := range pruneOpts {
+	for i := range prunePolicies {
 		if hasMaxUsedSpace {
-			pruneOpts[i].MaxUsedSpace = maxUsedSpaceBytes
+			prunePolicies[i].MaxUsedSpace = maxUsedSpaceBytes
 		}
 		if hasReservedSpace {
-			pruneOpts[i].ReservedSpace = reservedSpaceBytes
+			prunePolicies[i].ReservedSpace = reservedSpaceBytes
 		}
 		if hasMinFreeSpace {
-			pruneOpts[i].MinFreeSpace = minFreeSpaceBytes
+			prunePolicies[i].MinFreeSpace = minFreeSpaceBytes
 		}
 		if hasTargetSpace {
-			pruneOpts[i].TargetSpace = targetSpaceBytes
+			prunePolicies[i].TargetSpace = targetSpaceBytes
 		}
 	}
 
@@ -212,36 +188,103 @@ func (srv *Server) gc() {
 	srv.gcmu.Lock()
 	defer srv.gcmu.Unlock()
 
-	ch := make(chan bkclient.UsageInfo)
-	eg, ctx := errgroup.WithContext(context.TODO())
+	srv.gcLocked(context.Background())
+}
 
-	var size int64
-	eg.Go(func() error {
-		for ui := range ch {
-			size += ui.Size
-		}
-		return nil
-	})
+func (srv *Server) gcIfDiskPressure() {
+	ctx := context.Background()
 
-	eg.Go(func() error {
-		defer close(ch)
-		if policy := srv.baseWorker.GCPolicy(); len(policy) > 0 {
-			return srv.baseWorker.Prune(ctx, ch, policy...)
-		}
-		return nil
-	})
+	srv.gcmu.Lock()
+	defer srv.gcmu.Unlock()
 
-	err := eg.Wait()
+	if !srv.diskPressureGCNeeded(ctx) {
+		return
+	}
+
+	srv.gcLocked(ctx)
+}
+
+func (srv *Server) gcLocked(ctx context.Context) {
+	if srv.isShuttingDown() {
+		return
+	}
+
+	if len(srv.workerGCPolicies) == 0 {
+		return
+	}
+
+	dstat, err := disk.GetDiskStat(srv.rootDir)
+	if err != nil {
+		bklog.G(ctx).Warnf("gc skipped: failed to get disk stats: %+v", err)
+		return
+	}
+
+	// Refresh policy free-space inputs per GC pass. The default policy values are
+	// static and must not be mutated in place.
+	prunePolicies := cloneDagqlCachePrunePolicies(srv.workerGCPolicies)
+	for i := range prunePolicies {
+		prunePolicies[i].CurrentFreeSpace = dstat.Available
+	}
+
+	report, err := srv.engineCache.Prune(ctx, prunePolicies)
 	if err != nil {
 		bklog.G(ctx).Errorf("gc error: %+v", err)
 	}
-	if size > 0 {
-		bklog.G(ctx).Debugf("gc cleaned up %d bytes", size)
-		go srv.throttledReleaseUnreferenced()
+	if report.ReclaimedBytes > 0 {
+		bklog.G(ctx).Debugf("gc cleaned up %d bytes", report.ReclaimedBytes)
 	}
 }
 
-func getGCPolicy(cfg config.Config, bkcfg bkconfig.GCConfig, root string) []bkclient.PruneInfo {
+func (srv *Server) startDiskPressureGCMonitor() {
+	if srv.engineCache == nil || len(srv.workerGCPolicies) == 0 {
+		return
+	}
+
+	go func() {
+		ticker := time.NewTicker(localCacheDiskPressureCheckEvery)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-srv.shutdownCtx.Done():
+				return
+			case <-ticker.C:
+				if srv.diskPressureGCNeeded(context.Background()) {
+					srv.throttledDiskPressureGC()
+				}
+			}
+		}
+	}()
+}
+
+func (srv *Server) diskPressureGCNeeded(ctx context.Context) bool {
+	if srv.isShuttingDown() {
+		return false
+	}
+
+	if len(srv.workerGCPolicies) == 0 {
+		return false
+	}
+
+	dstat, err := disk.GetDiskStat(srv.rootDir)
+	if err != nil {
+		bklog.G(ctx).Warnf("disk pressure gc skipped: failed to get disk stats: %+v", err)
+		return false
+	}
+
+	return localCacheDiskPressureGCNeeded(srv.workerGCPolicies, dstat)
+}
+
+func localCacheDiskPressureGCNeeded(policies []dagqlCachePrunePolicy, dstat disk.DiskStat) bool {
+	for _, policy := range policies {
+		if policy.MinFreeSpace > 0 && dstat.Available < policy.MinFreeSpace {
+			return true
+		}
+	}
+	return false
+}
+
+func getDagqlGCPolicy(cfg config.Config, bkcfg bkconfig.GCConfig, root string) []dagqlCachePrunePolicy {
 	if cfg.GC.Enabled != nil && !*cfg.GC.Enabled {
 		return nil
 	}
@@ -259,10 +302,10 @@ func getGCPolicy(cfg config.Config, bkcfg bkconfig.GCConfig, root string) []bkcl
 		policies = defaultGCPolicy(cfg, bkcfg, dstat)
 	}
 
-	out := make([]bkclient.PruneInfo, 0, len(bkcfg.GCPolicy))
+	out := make([]dagqlCachePrunePolicy, 0, len(policies))
 	for _, policy := range policies {
-		info := bkclient.PruneInfo{
-			Filter:        policy.Filters,
+		info := dagqlCachePrunePolicy{
+			Filters:       slices.Clone(policy.Filters),
 			All:           policy.All,
 			KeepDuration:  policy.KeepDuration.Duration,
 			ReservedSpace: policy.ReservedSpace.AsBytes(dstat),
@@ -280,13 +323,14 @@ func getGCPolicy(cfg config.Config, bkcfg bkconfig.GCConfig, root string) []bkcl
 	return out
 }
 
-func getDefaultGCPolicy(cfg config.Config, bkcfg bkconfig.GCConfig, root string) *bkclient.PruneInfo {
+func getDefaultDagqlGCPolicy(cfg config.Config, bkcfg bkconfig.GCConfig, root string) *dagqlCachePrunePolicy {
 	// the last policy is the default one
-	policies := getGCPolicy(cfg, bkcfg, root)
+	policies := getDagqlGCPolicy(cfg, bkcfg, root)
 	if len(policies) == 0 {
 		return nil
 	}
-	return &policies[len(policies)-1]
+	policy := policies[len(policies)-1]
+	return &policy
 }
 
 func defaultGCPolicy(cfg config.Config, bkcfg bkconfig.GCConfig, dstat disk.DiskStat) []config.GCPolicy {
@@ -298,16 +342,36 @@ func defaultGCPolicy(cfg config.Config, bkcfg bkconfig.GCConfig, dstat disk.Disk
 		space = DetectDefaultGCCap(dstat)
 	}
 
-	policies := convertBkPolicies(bkconfig.DefaultGCPolicy(bkconfig.GCConfig{
-		GCMinFreeSpace:  bkconfig.DiskSpace(space.MinFreeSpace),
-		GCReservedSpace: bkconfig.DiskSpace(space.ReservedSpace),
-		GCMaxUsedSpace:  bkconfig.DiskSpace(space.MaxUsedSpace),
-	}, dstat))
-	for i, policy := range policies {
-		policy.SweepSize = space.SweepSize
-		policies[i] = policy
+	defaultSpace := config.GCSpace{
+		ReservedSpace: space.ReservedSpace,
+		MaxUsedSpace:  space.MaxUsedSpace,
+		MinFreeSpace:  space.MinFreeSpace,
+		SweepSize:     space.SweepSize,
 	}
-	return policies
+
+	return []config.GCPolicy{
+		{
+			Filters: []string{fmt.Sprintf(
+				"type==%s,type==%s,type==%s",
+				bkclient.UsageRecordTypeLocalSource,
+				bkclient.UsageRecordTypeCacheMount,
+				bkclient.UsageRecordTypeGitCheckout,
+			)},
+			KeepDuration: config.Duration{Duration: 48 * time.Hour},
+			GCSpace: config.GCSpace{
+				MaxUsedSpace: config.DiskSpace{Bytes: 512 * 1e6},
+				SweepSize:    space.SweepSize,
+			},
+		},
+		{
+			KeepDuration: config.Duration{Duration: 60 * 24 * time.Hour},
+			GCSpace:      defaultSpace,
+		},
+		{
+			All:     true,
+			GCSpace: defaultSpace,
+		},
+	}
 }
 
 func DetectDefaultGCCap(dstat disk.DiskStat) config.GCSpace {

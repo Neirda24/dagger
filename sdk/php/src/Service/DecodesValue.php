@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Dagger\Service;
 
 use Dagger\Client;
+use Dagger\Id;
 use Dagger\TypeDefKind;
 use Dagger\ValueObject\ListOfType;
 use Dagger\ValueObject\Type;
@@ -63,7 +64,13 @@ final readonly class DecodesValue
             case TypeDefKind::VOID_KIND:
                 return null;
             case TypeDefKind::ENUM_KIND:
-                return ($type->name)::from($value);
+                // Engine should be sending the backing value, unquoted, as per GQL
+                // However we are receiving the case's name, quoted.
+                return constant(sprintf(
+                    '%s::%s',
+                    $type->name,
+                    json_decode($value),
+                ));
             case TypeDefKind::INTERFACE_KIND:
                 throw new RuntimeException(sprintf(
                     'Currently cannot decode custom interfaces: %s',
@@ -71,10 +78,10 @@ final readonly class DecodesValue
                 ));
             case TypeDefKind::OBJECT_KIND:
                 if ($type->isIdable()) {
-                    $method = sprintf('load%sFromId', NormalizesClassName::shorten($type->name));
-                    $id = sprintf('%sId', $type->name);
-
-                    return $this->client->$method(new $id(json_decode($value)));
+                    return $this->client->loadObjectFromId(
+                        $type->name,
+                        new Id(json_decode($value)),
+                    );
                 }
 
                 throw new RuntimeException(sprintf(

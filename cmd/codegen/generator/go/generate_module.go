@@ -3,6 +3,7 @@ package gogenerator
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -10,10 +11,12 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"dagger.io/dagger"
 	"github.com/dagger/dagger/cmd/codegen/generator"
+	"github.com/dagger/dagger/cmd/codegen/generator/go/templates"
 	"github.com/dagger/dagger/cmd/codegen/introspection"
 	"github.com/dschmidt/go-layerfs"
 	"github.com/iancoleman/strcase"
@@ -23,7 +26,8 @@ import (
 )
 
 const (
-	daggerImportPath = "dagger.io/dagger"
+	daggerImportPath       = "dagger.io/dagger"
+	querybuilderImportPath = "github.com/dagger/querybuilder"
 )
 
 func (g *GoGenerator) GenerateModule(ctx context.Context, schema *introspection.Schema, schemaVersion string) (*generator.GeneratedState, error) {
@@ -83,8 +87,14 @@ func (g *GoGenerator) GenerateModule(ctx context.Context, schema *introspection.
 		partial = true
 	}
 
-	if len(initialGoFiles) == 0 {
+	if len(initialGoFiles) == 0 && !moduleConfig.IsInit {
 		// write an initial main.go if no main pkg exists yet
+		//
+		// Skipped at module-init time: the SDK that drives `dagger module init`
+		// owns the starter source via its `initModule` Changeset, and the engine
+		// merges that with this generated context. Scaffolding a main.go here too
+		// would make both changesets add the same path and the merge would fail
+		// with "path added in both changesets".
 		if err := mfs.WriteFile(StarterTemplateFile, []byte(baseModuleSource(pkgInfo, moduleConfig.ModuleName)), 0600); err != nil {
 			return nil, err
 		}
@@ -105,6 +115,61 @@ func (g *GoGenerator) GenerateModule(ctx context.Context, schema *introspection.
 
 	// respect existing package name
 	pkgInfo.PackageName = pkg.Name
+
+	// Emit the module's own types as introspection JSON and merge them into
+	// the deps schema via schemaTools — self-calls are always enabled for Go.
+	// This merge is the ONLY thing that contributes the module's types to the
+	// schema the bindings are generated from: the Go SDK no longer implements
+	// moduleTypes, so the engine does not self-append them. Dag is always set
+	// on the generate-module path (it connects for Go); the nil check guards
+	// other entry points.
+	//
+	// Schema views older than v0.12.0 alias every schema type into the main
+	// package (see _dagger.gen.go/module.go.tmpl), where self types would
+	// collide with the user's own declarations — those views keep bindings
+	// without self-calls.
+	if g.Config.Dag != nil && semver.Compare(schemaVersion, "v0.12.0") >= 0 {
+		moduleName := g.Config.ModuleConfig.ModuleName
+		// Merge idempotency is keyed on @sourceMap.module == moduleName, so a
+		// dependency installed under the module's own name would silently
+		// shadow the module's types. Refuse it with an actionable error.
+		if slices.Contains(schema.DependencyNames(), moduleName) {
+			return nil, fmt.Errorf(
+				"a dependency is installed under the module's own name %q; "+
+					"self-calls need distinct names — reinstall the dependency under "+
+					"another name (dagger install --name)", moduleName)
+		}
+		emitter := templates.NewModuleIntrospectionEmitter(ctx, schema, schemaVersion, g.Config, pkg, fset)
+		moduleTypesJSON, err := emitter.ModuleIntrospectionJSON(moduleName)
+		if err != nil {
+			return nil, fmt.Errorf("emit module types for self-call merge: %w", err)
+		}
+		// The engine's codegen path always passes --introspection-json-path,
+		// but generate-module can also run against live introspection; in that
+		// case rebuild the JSON the schema tool needs from the schema in hand.
+		depsJSON := g.Config.IntrospectionJSON
+		if depsJSON == "" {
+			data, err := json.Marshal(introspection.Response{Schema: schema, SchemaVersion: schemaVersion})
+			if err != nil {
+				return nil, fmt.Errorf("marshal introspection schema for self-call merge: %w", err)
+			}
+			depsJSON = string(data)
+		}
+		merged, err := g.Config.Dag.
+			Schema(dagger.JSON(depsJSON)).
+			Merge(dagger.JSON(moduleTypesJSON), moduleName).
+			Contents(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("merge module types into schema: %w", err)
+		}
+		var resp introspection.Response
+		if err := json.Unmarshal([]byte(merged), &resp); err != nil {
+			return nil, fmt.Errorf("unmarshal merged introspection JSON: %w", err)
+		}
+		schema = resp.Schema
+		generator.SetSchemaParents(schema)
+		generator.SetSchema(schema)
+	}
 
 	if err := generateCode(ctx, g.Config, schema, schemaVersion, mfs, pkgInfo, pkg, fset, 1); err != nil {
 		return nil, fmt.Errorf("generate code: %w", err)
@@ -195,8 +260,6 @@ func (g *GoGenerator) bootstrapMod(mfs *memfs.FS, genSt *generator.GeneratedStat
 		// PackageName is unknown until we load the package
 		PackageImport: path.Join(goMod.Module.Mod.Path, packageImport),
 
-		// Set to the official dagger go SDK package.
-		UtilityPkgImport:  "dagger.io/dagger",
 		DaggerPkgReplaced: isDaggerPkgCustomReplaced(goMod.Replace),
 	}, needsRegen, nil
 }
@@ -250,7 +313,9 @@ func (g *GoGenerator) syncModReplaceAndTidy(mod *modfile.File, genSt *generator.
 	// Otherwise, we install the given dagger.io/dagger package version.
 	if !isDaggerPkgCustomReplaced(mod.Replace) {
 		genSt.PostCommands = append(genSt.PostCommands,
-			exec.Command("go", "get", "-u", daggerImportPath+"@"+g.Config.ModuleConfig.LibVersion))
+			// Do not pass -u here: LibVersion pins dagger.io/dagger, while -u also
+			// asks Go to upgrade transitive dependencies during generation.
+			exec.Command("go", "get", daggerImportPath+"@"+g.Config.ModuleConfig.LibVersion))
 	}
 
 	genSt.PostCommands = append(genSt.PostCommands,
@@ -274,7 +339,7 @@ func baseModuleSource(pkgInfo *PackageInfo, moduleName string) string {
 
 	return fmt.Sprintf(`// A generated module for %[1]s functions
 //
-// This module has been generated via dagger init and serves as a reference to
+// This module has been generated via dagger module init and serves as a reference to
 // basic module structure as you get started with Dagger.
 //
 // Two functions have been pre-created. You can modify, delete, or add to them,

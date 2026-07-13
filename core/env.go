@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/dagger/dagger/dagql"
-	"github.com/dagger/dagger/dagql/call"
 	"github.com/dagger/dagger/util/hashutil"
 	"github.com/opencontainers/go-digest"
 	"github.com/vektah/gqlparser/v2/ast"
@@ -23,11 +22,11 @@ type Env struct {
 	deps *SchemaBuilder
 
 	// The main module for this environment (the project being worked on)
-	MainModule *Module
+	MainModule dagql.ObjectResult[*Module]
 
 	// The modules explicitly installed into the environment, to be exposed as
 	// tools that implicitly call the constructor with the environment's workspace
-	installedModules []*Module
+	installedModules []dagql.ObjectResult[*Module]
 
 	// Input values
 	inputsByName map[string]*Binding
@@ -48,22 +47,27 @@ func (*Env) Type() *ast.Type {
 
 type envKey struct{}
 
-func EnvIDToContext(ctx context.Context, env *call.ID) context.Context {
+func EnvToContext(ctx context.Context, env dagql.ObjectResult[*Env]) context.Context {
 	return context.WithValue(ctx, envKey{}, env)
 }
 
-func EnvIDFromContext(ctx context.Context) (res *call.ID, ok bool) {
-	// Env overidden via explicit context, i.e. from LLM to tool call
-	env, ok := ctx.Value(envKey{}).(*call.ID)
-	if !ok {
-		q, err := CurrentQuery(ctx)
-		if err == nil && q.CurrentEnv != nil {
-			// Env set on Query, i.e. propagated from LLM to module
-			return q.CurrentEnv, true
-		}
-		return res, false
+func EnvFromContext(ctx context.Context) (dagql.ObjectResult[*Env], bool, error) {
+	if env, ok := ctx.Value(envKey{}).(dagql.ObjectResult[*Env]); ok && env.Self() != nil {
+		return env, true, nil
 	}
-	return env, true
+
+	q, _ := CurrentQuery(ctx)
+	if q == nil {
+		return dagql.ObjectResult[*Env]{}, false, nil
+	}
+	env, err := q.Server.CurrentEnv(ctx)
+	if err != nil {
+		return dagql.ObjectResult[*Env]{}, false, err
+	}
+	if env.Self() == nil {
+		return dagql.ObjectResult[*Env]{}, false, nil
+	}
+	return env, true, nil
 }
 
 func NewEnv(workspace dagql.ObjectResult[*Directory], deps *SchemaBuilder) *Env {
@@ -92,16 +96,16 @@ func (env *Env) WithWorkspace(dir dagql.ObjectResult[*Directory]) *Env {
 	return &cp
 }
 
-func (env *Env) WithMainModule(mod *Module) *Env {
+func (env *Env) WithMainModule(mod dagql.ObjectResult[*Module]) *Env {
 	cp := env.Clone()
 	cp.MainModule = mod
-	cp.deps = cp.deps.Append(mod)
+	cp.deps = cp.deps.Append(NewUserMod(mod))
 	return cp
 }
 
-func (env *Env) WithModule(mod *Module) *Env {
+func (env *Env) WithModule(mod dagql.ObjectResult[*Module]) *Env {
 	cp := env.Clone()
-	cp.deps = cp.deps.Append(mod)
+	cp.deps = cp.deps.Append(NewUserMod(mod))
 	cp.installedModules = append(cp.installedModules, mod)
 	return cp
 }
@@ -195,24 +199,24 @@ func (env *Env) WithoutInput(key string) *Env {
 }
 
 // Checks returns a CheckGroup from the main module
-func (env *Env) Checks(ctx context.Context, include []string) (*CheckGroup, error) {
-	if env.MainModule == nil {
+func (env *Env) Checks(ctx context.Context, include []string, noGenerate bool) (*CheckGroup, error) {
+	if env.MainModule.Self() == nil {
 		return nil, fmt.Errorf("no main module set on environment")
 	}
-	return env.MainModule.Checks(ctx, include)
+	return NewCheckGroup(ctx, env.MainModule, include, noGenerate, false)
 }
 
 // Services returns an UpGroup from the main module
 func (env *Env) Services(ctx context.Context, include []string) (*UpGroup, error) {
-	if env.MainModule == nil {
+	if env.MainModule.Self() == nil {
 		return nil, fmt.Errorf("no main module set on environment")
 	}
-	return env.MainModule.Services(ctx, include)
+	return NewUpGroup(ctx, env.MainModule, include)
 }
 
 // Check returns a single check by name from the main module
 func (env *Env) Check(ctx context.Context, name string) (*Check, error) {
-	checkGroup, err := env.Checks(ctx, []string{name})
+	checkGroup, err := env.Checks(ctx, []string{name}, false)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +291,11 @@ func (b *Binding) ID() string {
 func (b *Binding) Digest() digest.Digest {
 	obj, isObject := b.AsObject()
 	if isObject {
-		return obj.ID().Digest()
+		id, err := obj.ID()
+		if err != nil {
+			return digest.FromString("")
+		}
+		return id.Digest()
 	}
 	jsonBytes, err := json.Marshal(b.Value)
 	if err != nil {
@@ -308,6 +316,11 @@ func (b *Binding) AsString() (string, bool) {
 // based on available types
 type EnvHook struct {
 	Server *dagql.Server
+}
+
+func (s EnvHook) ForkInstallHook(server *dagql.Server) dagql.InstallHook {
+	s.Server = server
+	return s
 }
 
 // We don't expose these types to modules SDK codegen, but
@@ -363,6 +376,7 @@ func (s EnvHook) ExtendEnvType(targetType dagql.ObjectType, directives ...*ast.D
 		return fmt.Errorf("failed to lookup ID type for %T", targetType)
 	}
 	typeName := targetType.TypeName()
+	viewFilter := envExtensionViewFilter(targetType)
 	// Install get<TargetType>()
 	envType.Extend(
 		dagql.FieldSpec{
@@ -370,6 +384,7 @@ func (s EnvHook) ExtendEnvType(targetType dagql.ObjectType, directives ...*ast.D
 			Description: fmt.Sprintf("Create or update a binding of type %s in the environment", typeName),
 			Type:        envType.Typed(),
 			Directives:  directives,
+			ViewFilter:  viewFilter,
 			Args: dagql.NewInputSpecs(
 				dagql.InputSpec{
 					Name:        "name",
@@ -393,12 +408,20 @@ func (s EnvHook) ExtendEnvType(targetType dagql.ObjectType, directives ...*ast.D
 			name := args["name"].(dagql.String).String()
 			value := args["value"].(dagql.IDType)
 			description := args["description"].(dagql.String).String()
-			obj, err := s.Server.Load(ctx, value.ID())
+			id, err := value.ID()
+			if err != nil {
+				return nil, fmt.Errorf("binding %q value ID: %w", name, err)
+			}
+			srv := dagql.CurrentDagqlServer(ctx)
+			if srv == nil {
+				return nil, fmt.Errorf("current dagql server not found")
+			}
+			obj, err := srv.Load(ctx, id)
 			if err != nil {
 				return nil, err
 			}
 
-			return dagql.NewResultForCurrentID(ctx, env.WithInput(name, obj, description))
+			return dagql.NewResultForCurrentCall(ctx, env.WithInput(name, obj, description))
 		},
 	)
 
@@ -408,6 +431,7 @@ func (s EnvHook) ExtendEnvType(targetType dagql.ObjectType, directives ...*ast.D
 			Description: fmt.Sprintf("Declare a desired %s output to be assigned in the environment", typeName),
 			Type:        envType.Typed(),
 			Directives:  directives,
+			ViewFilter:  viewFilter,
 			Args: dagql.NewInputSpecs(
 				dagql.InputSpec{
 					Name:        "name",
@@ -426,7 +450,7 @@ func (s EnvHook) ExtendEnvType(targetType dagql.ObjectType, directives ...*ast.D
 			name := args["name"].(dagql.String).String()
 			desc := args["description"].(dagql.String).String()
 
-			return dagql.NewResultForCurrentID(ctx, env.WithOutput(name, targetType, desc))
+			return dagql.NewResultForCurrentCall(ctx, env.WithOutput(name, targetType, desc))
 		},
 	)
 
@@ -439,6 +463,7 @@ func (s EnvHook) ExtendEnvType(targetType dagql.ObjectType, directives ...*ast.D
 			Args:        dagql.InputSpecs{},
 			DoNotCache:  "Bindings are mutable",
 			Directives:  directives,
+			ViewFilter:  viewFilter,
 		},
 		func(ctx context.Context, self dagql.AnyResult, args map[string]dagql.Input) (dagql.AnyResult, error) {
 			binding := self.(dagql.ObjectResult[*Binding]).Self()
@@ -453,7 +478,7 @@ func (s EnvHook) ExtendEnvType(targetType dagql.ObjectType, directives ...*ast.D
 			res, ok := val.(dagql.AnyResult)
 			if !ok {
 				var err error
-				res, err = dagql.NewResultForCurrentID(ctx, val)
+				res, err = dagql.NewResultForCurrentCall(ctx, val)
 				if err != nil {
 					return nil, fmt.Errorf("failed to convert binding %q value to result: %w", binding.Key, err)
 				}
@@ -462,6 +487,17 @@ func (s EnvHook) ExtendEnvType(targetType dagql.ObjectType, directives ...*ast.D
 		},
 	)
 	return nil
+}
+
+func (s EnvHook) InstallInterface(_ *dagql.Interface, _ ...*ast.Directive) {
+}
+
+func envExtensionViewFilter(targetType dagql.ObjectType) dagql.ViewFilter {
+	viewFiltered, ok := targetType.(interface{ ViewFilter() dagql.ViewFilter })
+	if !ok {
+		return nil
+	}
+	return viewFiltered.ViewFilter()
 }
 
 func (s EnvHook) InstallObject(targetType dagql.ObjectType, directives ...*ast.Directive) {
@@ -491,13 +527,13 @@ func (s EnvHook) InstallObject(targetType dagql.ObjectType, directives ...*ast.D
 	}
 }
 
-func (s EnvHook) ModuleWithObject(ctx context.Context, mod *Module, targetTypedef *TypeDef) (*Module, error) {
+func (s EnvHook) ModuleWithObject(ctx context.Context, mod *Module, targetTypedef dagql.ObjectResult[*TypeDef]) (*Module, error) {
 	// Install the target type
 	mod, err := mod.WithObject(ctx, targetTypedef)
 	if err != nil {
 		return nil, err
 	}
-	typename := targetTypedef.Type().Name()
+	typename := targetTypedef.Self().Type().Name()
 	targetType, ok := s.Server.ObjectType(typename)
 	if !ok {
 		return nil, fmt.Errorf("can't retrieve object type %s", typename)

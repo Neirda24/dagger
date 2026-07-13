@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -25,7 +26,17 @@ type EnvFile struct {
 	// Variables stored as key-value pairs, preserving order and allowing duplicates
 	Environ []string `json:"variables"`
 	Expand  bool     `json:"expand"`
+	// Context holds variables that are used only for ${...} expansion of the
+	// Environ values. They are not exposed via Variables/Lookup/AsFile. This is
+	// how Namespace preserves non-matching variables (e.g. a shared ROOT_DIR)
+	// that namespaced values still reference but that should not become defaults.
+	Context []string `json:"context,omitempty"`
 }
+
+var (
+	_ dagql.PersistedObject        = (*EnvFile)(nil)
+	_ dagql.PersistedObjectDecoder = (*EnvFile)(nil)
+)
 
 func (*EnvFile) Type() *ast.Type {
 	return &ast.Type{
@@ -36,6 +47,25 @@ func (*EnvFile) Type() *ast.Type {
 
 func (*EnvFile) TypeDescription() string {
 	return "A collection of environment variables."
+}
+
+func (ef *EnvFile) EncodePersistedObject(ctx context.Context, cache dagql.PersistedObjectCache) (dagql.PersistedObjectEncoding, error) {
+	_ = ctx
+	_ = cache
+	if ef == nil {
+		return dagql.PersistedObjectEncoding{}, fmt.Errorf("encode persisted env file: nil env file")
+	}
+	return encodePersistedObjectPayload(ef)
+}
+
+func (*EnvFile) DecodePersistedObject(ctx context.Context, dag *dagql.Server, _ uint64, _ *dagql.ResultCall, payload json.RawMessage) (dagql.Typed, error) {
+	_ = ctx
+	_ = dag
+	var ef EnvFile
+	if err := json.Unmarshal(payload, &ef); err != nil {
+		return nil, fmt.Errorf("decode persisted env file payload: %w", err)
+	}
+	return &ef, nil
 }
 
 // Len returns the number of variables in the EnvFile
@@ -58,7 +88,7 @@ func (ef *EnvFile) WithVariables(variables []EnvVariable) *EnvFile {
 	return ef
 }
 
-// WithVariables adds multiple environment variables to the EnvFile
+// WithEnvFiles adds multiple environment variables to the EnvFile
 func (ef *EnvFile) WithEnvFiles(others ...*EnvFile) *EnvFile {
 	ef = ef.Clone()
 	for _, other := range others {
@@ -68,6 +98,9 @@ func (ef *EnvFile) WithEnvFiles(others ...*EnvFile) *EnvFile {
 		// Last variable assignment wins: other file's variables win over
 		// our own.
 		ef.Environ = append(ef.Environ, other.Environ...)
+		// Carry over hidden expansion context so namespaced values keep
+		// resolving their references after files are merged.
+		ef.Context = append(ef.Context, other.Context...)
 	}
 	return ef
 }
@@ -76,6 +109,7 @@ func (ef *EnvFile) WithEnvFiles(others ...*EnvFile) *EnvFile {
 func (ef *EnvFile) Clone() *EnvFile {
 	cp := *ef
 	cp.Environ = slices.Clone(ef.Environ)
+	cp.Context = slices.Clone(ef.Context)
 	return &cp
 }
 
@@ -116,7 +150,7 @@ func (ef *EnvFile) variables(ctx context.Context, allowUnboundVariables bool) (v
 		// Fallback to using host values for expansion
 		return Host{}.GetEnv(ctx, name)
 	}
-	all, err := dotenv.All(ef.Environ, hostGetEnv, !allowUnboundVariables)
+	all, err := dotenv.AllWithContext(ef.Environ, ef.Context, hostGetEnv, !allowUnboundVariables)
 	if err != nil {
 		return nil, err
 	}
@@ -141,16 +175,24 @@ func (ef *EnvFile) variables(ctx context.Context, allowUnboundVariables bool) (v
 //	TOKEN=topsecret
 //	NAME=hello
 func (ef *EnvFile) Namespace(ctx context.Context, prefix string) (*EnvFile, error) {
-	vars, err := ef.Variables(ctx, false)
+	// use raw variables here given that they'll get expanded later when used
+	vars, err := ef.Variables(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("Evaluate env file: %w", err)
 	}
 	result := &EnvFile{
 		Expand: ef.Expand,
+		// Preserve any hidden expansion context already carried by the source.
+		Context: slices.Clone(ef.Context),
 	}
 	for _, variable := range vars {
 		if after, match := cutFlexPrefix(variable.Name, prefix); match {
-			result = result.WithVariable(after, variable.Value)
+			result.add(after, variable.Value)
+		} else {
+			// Keep non-matching variables as hidden expansion context so that
+			// namespaced values referencing them (e.g. SOURCE=${ROOT_DIR}) can
+			// still be expanded later. They are not exposed as defaults.
+			result.Context = append(result.Context, variable.Name+"="+variable.Value)
 		}
 	}
 	return result, nil
@@ -198,7 +240,7 @@ func (ef *EnvFile) Lookup(ctx context.Context, name string, raw bool) (string, b
 		// Fallback to using host values for expansion
 		return Host{}.GetEnv(ctx, name)
 	}
-	return dotenv.Lookup(ef.Environ, name, hostGetEnv)
+	return dotenv.LookupWithContext(ef.Environ, ef.Context, name, hostGetEnv)
 }
 
 func (ef *EnvFile) LookupCaseInsensitive(ctx context.Context, name string) (string, bool, error) {
@@ -229,8 +271,8 @@ func (ef *EnvFile) add(name, value string) {
 	}
 }
 
-// AsFile converts the EnvFile to a File containing the environment variables
-func (ef *EnvFile) AsFile(ctx context.Context) (*File, error) {
+// AsFile converts the EnvFile to a File containing the environment variables.
+func (ef *EnvFile) AsFile(ctx context.Context) (dagql.ObjectResult[*File], error) {
 	// FIXME: expand
 	contents := strings.Join(ef.Environ, "\n")
 	if len(ef.Environ) > 0 {
@@ -253,12 +295,12 @@ func (ef *EnvFile) AsFile(ctx context.Context) (*File, error) {
 	}
 	srv, err := CurrentDagqlServer(ctx)
 	if err != nil {
-		return nil, err
+		return dagql.ObjectResult[*File]{}, err
 	}
-	var file *File
+	var file dagql.ObjectResult[*File]
 	err = srv.Select(ctx, srv.Root(), &file, q...)
 	if err != nil {
-		return nil, err
+		return dagql.ObjectResult[*File]{}, err
 	}
 	return file, nil
 }
@@ -271,6 +313,9 @@ func (ef *EnvFile) WithContents(contents string) (*EnvFile, error) {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
+		// Tolerate the common `export KEY=value` convention by stripping the
+		// leading `export` keyword before parsing.
+		line = dotenv.StripExportPrefix(strings.TrimSpace(line))
 		kv := strings.SplitN(line, "=", 2)
 		k := kv[0]
 		var v string

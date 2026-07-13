@@ -44,7 +44,7 @@ fi
 # many systems default to 1024 which is far too low
 ulimit -n 1048576 || echo "cannot increase open FDs with ulimit, ignoring"
 
-exec {{.EngineBin}} --config {{.EngineConfig}} "$@"
+exec tini -- {{.EngineBin}} --config {{.EngineConfig}} "$@"
 `
 
 const engineConfigTmpl = `
@@ -82,9 +82,19 @@ func generateEntrypoint() (*dagger.File, error) {
 
 func generateConfig(logLevel string) (*dagger.File, error) {
 	cfg := struct {
-		LogLevel string `json:"logLevel,omitempty"`
+		LogLevel   string `json:"logLevel,omitempty"`
+		Registries map[string]struct {
+			Mirrors []string `json:"mirrors"`
+		} `json:"registries"`
 	}{
 		LogLevel: logLevel,
+		Registries: map[string]struct {
+			Mirrors []string `json:"mirrors"`
+		}{
+			"docker.io": {
+				Mirrors: []string{"mirror.gcr.io"},
+			},
+		},
 	}
 
 	res, err := json.MarshalIndent(cfg, "", "  ")
@@ -99,7 +109,7 @@ func generateConfig(logLevel string) (*dagger.File, error) {
 	return config, nil
 }
 
-func generateBKConfig(kvs []string) (*dagger.File, error) {
+func generateEngineTOML(kvs []string) (*dagger.File, error) {
 	opts := map[string]string{}
 	for _, kv := range kvs {
 		k, v, ok := strings.Cut(kv, "=")

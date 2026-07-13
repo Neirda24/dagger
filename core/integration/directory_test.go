@@ -1,7 +1,15 @@
 package core
 
+// These tests cover the GraphQL Directory object: creating, reading, filtering,
+// mounting, exporting, and comparing directory contents.
+//
+// See also:
+// - file_test.go: core File object behavior.
+// - ownership_test.go: file and directory ownership propagation.
+
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -9,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dagger/dagger/engine/buildkit"
+	"github.com/dagger/dagger/engine/engineutil"
 	"github.com/dagger/dagger/internal/buildkit/identity"
 	"github.com/stretchr/testify/require"
 
@@ -292,6 +300,98 @@ func (DirectorySuite) TestWithDirectory(ctx context.Context, t *testctx.T) {
 		_, err := c.Directory().WithDirectory("/", c.Directory()).Sync(ctx)
 		require.NoError(t, err)
 	})
+
+	t.Run("chains preserve layered semantics", func(ctx context.Context, t *testctx.T) {
+		base := c.Directory().
+			WithNewFile("keep.txt", "base").
+			WithNewFile("conflict.txt", "base")
+		srcA := c.Directory().
+			WithNewFile("a.txt", "a").
+			WithNewFile("conflict.txt", "a").
+			WithNewFile("skip.txt", "skip")
+		srcB := c.Directory().
+			WithNewFile("b.txt", "b")
+		srcC := c.Directory().
+			WithNewFile("c.txt", "c").
+			WithNewFile("conflict.txt", "c")
+
+		dir := base.
+			WithDirectory("/", srcA, dagger.DirectoryWithDirectoryOpts{Exclude: []string{"skip.txt"}}).
+			WithDirectory("nested", srcB).
+			WithDirectory("/", srcC)
+
+		contents, err := dir.File("keep.txt").Contents(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "base", contents)
+
+		contents, err = dir.File("a.txt").Contents(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "a", contents)
+
+		contents, err = dir.File("nested/b.txt").Contents(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "b", contents)
+
+		contents, err = dir.File("c.txt").Contents(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "c", contents)
+
+		contents, err = dir.File("conflict.txt").Contents(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "c", contents)
+
+		_, err = dir.File("skip.txt").Contents(ctx)
+		require.Error(t, err)
+	})
+
+	t.Run("directory replacing file hides older lower directory contents", func(ctx context.Context, t *testctx.T) {
+		seed := c.Container().
+			WithDirectory("/node", c.Directory().WithNewFile("hidden.txt", "hidden")).
+			WithoutDirectory("/node").
+			WithNewFile("/node", "file")
+
+		seedRef, err := seed.Publish(ctx, registryRef("with-directory-file-to-dir-opaque-seed"))
+		require.NoError(t, err)
+
+		baseDir := c.Container().From(seedRef).Rootfs()
+		resultDir := baseDir.WithDirectory("/node", c.Directory().WithNewFile("new.txt", "new"))
+
+		nodeEntries, err := resultDir.Directory("node").Entries(ctx)
+		require.NoError(t, err)
+		require.Equal(t, []string{"new.txt"}, nodeEntries)
+	})
+}
+
+func (DirectorySuite) TestWithDirectoryPermissionsOverride(ctx context.Context, t *testctx.T) {
+	c := connect(ctx, t)
+
+	src := c.Directory().
+		WithNewDirectory("nested", dagger.DirectoryWithNewDirectoryOpts{Permissions: 0o700}).
+		WithNewFile("nested/file.txt", "nested", dagger.DirectoryWithNewFileOpts{Permissions: 0o600}).
+		WithNewFile("root.txt", "root", dagger.DirectoryWithNewFileOpts{Permissions: 0o640})
+
+	dir := c.Directory().WithDirectory("out", src, dagger.DirectoryWithDirectoryOpts{
+		Permissions: 0o751,
+	})
+
+	ctr := c.Container().From(alpineImage).WithDirectory("/", dir)
+	stdout, err := ctr.WithExec([]string{"sh", "-lc", "stat -c '%a %n' /out /out/nested /out/nested/file.txt /out/root.txt"}).Stdout(ctx)
+	require.NoError(t, err)
+	require.Contains(t, stdout, "751 /out")
+	require.Contains(t, stdout, "751 /out/nested")
+	require.Contains(t, stdout, "751 /out/nested/file.txt")
+	require.Contains(t, stdout, "751 /out/root.txt")
+
+	dir = c.Directory().WithDirectory("/", src, dagger.DirectoryWithDirectoryOpts{
+		Permissions: 0o751,
+	})
+
+	ctr = c.Container().From(alpineImage).WithDirectory("/", dir)
+	stdout, err = ctr.WithExec([]string{"sh", "-lc", "stat -c '%a %n' /nested /nested/file.txt /root.txt"}).Stdout(ctx)
+	require.NoError(t, err)
+	require.Contains(t, stdout, "751 /nested")
+	require.Contains(t, stdout, "751 /nested/file.txt")
+	require.Contains(t, stdout, "751 /root.txt")
 }
 
 func (DirectorySuite) TestWithDirectoryUnion(ctx context.Context, t *testctx.T) {
@@ -801,10 +901,12 @@ func (DirectorySuite) TestDiff(ctx context.Context, t *testctx.T) {
 		aID := newDirWithFile(t, "a-file", "a-content")
 		bID := newDirWithFile(t, "b-file", "b-content")
 
-		diff := `query Diff($id: DirectoryID!, $other: DirectoryID!) {
-			loadDirectoryFromID(id: $id) {
-				diff(other: $other) {
-					entries
+		diff := `query Diff($id: ID!, $other: ID!) {
+			directory: node(id: $id) {
+				... on Directory {
+					diff(other: $other) {
+						entries
+					}
 				}
 			}
 		}`
@@ -814,7 +916,7 @@ func (DirectorySuite) TestDiff(ctx context.Context, t *testctx.T) {
 				Diff struct {
 					Entries []string
 				}
-			} `json:"loadDirectoryFromID"`
+			} `json:"directory"`
 		}](c, t, diff, &testutil.QueryOptions{
 			Variables: map[string]any{
 				"id":    aID,
@@ -830,7 +932,7 @@ func (DirectorySuite) TestDiff(ctx context.Context, t *testctx.T) {
 				Diff struct {
 					Entries []string
 				}
-			} `json:"loadDirectoryFromID"`
+			} `json:"directory"`
 		}](c, t, diff, &testutil.QueryOptions{
 			Variables: map[string]any{
 				"id":    bID,
@@ -845,7 +947,8 @@ func (DirectorySuite) TestDiff(ctx context.Context, t *testctx.T) {
 	// this is a regression test for: https://github.com/dagger/dagger/pull/7328
 	t.Run("equivalent", func(ctx context.Context, t *testctx.T) {
 		c := connect(ctx, t)
-		a := c.Git("github.com/dagger/dagger").Ref("main").Tree()
+		// This diff checks source content equivalence; .git checkout metadata is not stable enough for it.
+		a := c.Git("github.com/dagger/dagger").Ref("main").Tree(dagger.GitRefTreeOpts{DiscardGitDir: true})
 		b := c.Directory().WithDirectory("", a)
 		ents, err := a.Diff(b).Entries(ctx)
 		require.NoError(t, err)
@@ -924,13 +1027,19 @@ func (DirectorySuite) TestChownLookup(ctx context.Context, t *testctx.T) {
 	d := c.Container().
 		From(alpineImage).
 		WithExec([]string{"sh", "-c", "addgroup -g 4321 agroup && adduser -D -u 1234 -G agroup auser"}).
-		Rootfs()
-
-	_, err := d.
+		Rootfs().
 		WithNewDirectory("dir").
-		Chown("dir", "auser:agroup").
-		Sync(ctx)
+		WithNewFile("dir/file.txt", "hello").
+		Chown("dir", "auser:agroup")
+
+	out, err := c.Container().
+		From(alpineImage).
+		WithExec([]string{"sh", "-c", "addgroup -g 4321 agroup && adduser -D -u 1234 -G agroup auser"}).
+		WithMountedDirectory("/mnt", d.Directory("dir")).
+		WithExec([]string{"stat", "-c", "%u:%g %U:%G", "/mnt/file.txt"}).
+		Stdout(ctx)
 	require.NoError(t, err)
+	require.Equal(t, "1234:4321 auser:agroup\n", out)
 }
 
 func (DirectorySuite) TestExport(ctx context.Context, t *testctx.T) {
@@ -1383,7 +1492,7 @@ func (DirectorySuite) TestDigest(ctx context.Context, t *testctx.T) {
 
 		digest, err := dir.Digest(ctx)
 		require.NoError(t, err)
-		require.Equal(t, "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", digest)
+		require.Equal(t, "sha256:0e5db88383bce812f795689f5318a2b2f4fde740ef31c2a2365a46368aafddd2", digest)
 	})
 }
 
@@ -1429,7 +1538,9 @@ func (DirectorySuite) TestDirectoryName(ctx context.Context, t *testctx.T) {
 	})
 
 	t.Run("git directory", func(ctx context.Context, t *testctx.T) {
-		dir := c.Git("https://github.com/dagger/dagger#ee32df913f57c876e067bd5ecc159561510b6f50").Head().Tree()
+		// Pin the commit explicitly: a git URL fragment is not honored by .Head()
+		// (which tracks the live default branch), and .dagger no longer exists there.
+		dir := c.Git("https://github.com/dagger/dagger").Commit("ee32df913f57c876e067bd5ecc159561510b6f50").Tree()
 
 		t.Run("root directory", func(ctx context.Context, t *testctx.T) {
 			rootName, err := dir.Name(ctx)
@@ -1613,7 +1724,7 @@ func (DirectorySuite) TestPatchFileLargerThanMaxFileContentsSize(ctx context.Con
 		WithExec([]string{
 			"sh",
 			"-c",
-			fmt.Sprintf("head -c %d /dev/zero | tr '\\000' 'a' > /large.txt", buildkit.MaxFileContentsSize+1),
+			fmt.Sprintf("head -c %d /dev/zero | tr '\\000' 'a' > /large.txt", engineutil.MaxFileContentsSize+1),
 		}).
 		File("/large.txt")
 
@@ -1624,12 +1735,12 @@ func (DirectorySuite) TestPatchFileLargerThanMaxFileContentsSize(ctx context.Con
 
 	patchSize, err := patchFile.Size(ctx)
 	require.NoError(t, err)
-	require.Greater(t, patchSize, buildkit.MaxFileContentsSize)
+	require.Greater(t, patchSize, engineutil.MaxFileContentsSize)
 
 	patchID, err := patchFile.ID(ctx)
 	require.NoError(t, err)
 
-	loadedPatch := c.LoadFileFromID(patchID)
+	loadedPatch := dagger.Ref[*dagger.File](c, patchID)
 	loadedPatchID, err := loadedPatch.ID(ctx)
 	require.NoError(t, err)
 	require.Equal(t, patchID, loadedPatchID)
@@ -1644,7 +1755,7 @@ func (DirectorySuite) TestPatchFileLargerThanMaxFileContentsSize(ctx context.Con
 
 	size, err := patchedDir.File("large.txt").Size(ctx)
 	require.NoError(t, err)
-	require.Equal(t, buildkit.MaxFileContentsSize+1, size)
+	require.Equal(t, engineutil.MaxFileContentsSize+1, size)
 }
 
 func (DirectorySuite) TestSearch(ctx context.Context, t *testctx.T) {
@@ -2791,16 +2902,18 @@ func (DirectorySuite) TestDirCaching(ctx context.Context, t *testctx.T) {
 	// if this side-effect were to ever change (i.e. adopting SOURCE_DATE_EPOCH functionality),
 	// then this test will break.
 
+	randID := rand.Text()
+
 	c := connect(ctx, t)
 	d1, err := c.Directory().
 		WithoutFile("non-existent").
-		WithNewFile("file", "data").
+		WithNewFile("file", randID).
 		Sync(ctx)
 	require.NoError(t, err)
 
 	d2, err := c.Directory().
 		WithoutFile("also-non-existent").
-		WithNewFile("file", "data").
+		WithNewFile("file", randID).
 		Sync(ctx)
 	require.NoError(t, err)
 

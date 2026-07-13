@@ -1,5 +1,12 @@
 package core
 
+// These tests cover `dagger.Connect` clients used by Go callers. They verify
+// connection setup, teardown, and session behavior between a caller and the
+// engine.
+//
+// See also:
+// - suite_test.go: shared connection setup used by integration tests.
+
 import (
 	"context"
 	"fmt"
@@ -38,7 +45,8 @@ func (ClientSuite) TestMultiSameTrace(ctx context.Context, t *testctx.T) {
 	newClient := func(ctx context.Context, name string) (*dagger.Client, *safeBuffer) {
 		out := new(safeBuffer)
 		c, err := dagger.Connect(ctx,
-			dagger.WithLogOutput(io.MultiWriter(prefixw.New(testutil.NewTWriter(t), name+": "), out)))
+			dagger.WithLogOutput(io.MultiWriter(prefixw.New(testutil.NewTWriter(t), name+": "), out)),
+		)
 		require.NoError(t, err)
 		t.Cleanup(func() { c.Close() })
 		return c, out
@@ -133,12 +141,15 @@ func (ClientSuite) TestClientStableID(ctx context.Context, t *testctx.T) {
 	devEngine := devEngineContainer(c)
 	clientCtr := engineClientContainer(ctx, t, c, devEngineContainerAsService(devEngine))
 
-	// just run any dagger cli command that connects to the engine
+	// just run any dagger cli command that connects to the engine.
+	// `dagger query` reads the GraphQL document from --doc (the positional arg
+	// is an optional operation name), so point it at a trivially valid query.
 	stableID, err := clientCtr.
 		WithExec([]string{"adduser", "-u", "1234", "-D", "auser"}).
 		WithUser("auser").
 		WithWorkdir("/work").
-		WithExec([]string{"dagger", "init", "--sdk=go"}).
+		WithNewFile("/query.graphql", `{ version }`).
+		WithExec([]string{"dagger", "query", "--doc", "/query.graphql"}).
 		File("/home/auser/.local/state/dagger/stable_client_id").
 		Contents(ctx)
 	require.NoError(t, err)
@@ -244,8 +255,8 @@ func (ClientSuite) TestSendsLabelsInTelemetry(ctx context.Context, t *testctx.T)
 
 	_, err = withCode.
 		WithMountedCache("/events", eventsVol).
-		WithExec([]string{"sh", "-c", "grep dagger.io/git.title $0", fmt.Sprintf("/events/%s/**/*.json", eventsID)}).
-		WithExec([]string{"sh", "-c", "grep 'init test repo' $0", fmt.Sprintf("/events/%s/**/*.json", eventsID)}).
+		WithExec([]string{"grep", "-R", "dagger.io/git.title", fmt.Sprintf("/events/%s", eventsID)}).
+		WithExec([]string{"grep", "-R", "init test repo", fmt.Sprintf("/events/%s", eventsID)}).
 		Sync(ctx)
 	require.NoError(t, err)
 }

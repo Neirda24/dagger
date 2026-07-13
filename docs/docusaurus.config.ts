@@ -1,14 +1,74 @@
 import type { Config } from "@docusaurus/types";
 import type * as Preset from "@docusaurus/preset-classic";
-import { themes as prismThemes } from "prism-react-renderer";
 import remarkCodeImport from "remark-code-import";
 import remarkTemplate from "./plugins/remark-template";
 import llmsTxtPlugin from "./plugins/llms-txt-plugin";
+import daggerApiReference from "./plugins/dagger-api-reference";
 import path from "path";
+import { daggerDarkPrismTheme } from "./src/prism/theme";
 
 import { daggerVersion } from "./current_docs/partials/version";
 
 const url = "https://docs.dagger.io";
+const docsPath = "./current_docs";
+const baseUrl = process.env.DOCUSAURUS_BASE_URL ?? "/";
+const latestVersion = "0.21.4";
+const versions = require("./versions.json") as string[];
+// Local search only indexes the default version (served at the root). Keep the
+// auto-generated SDK reference and every non-default version out of the index.
+const localSearchExclude = [
+  "/reference/typescript/",
+  ...versions
+    .filter((v) => v !== latestVersion)
+    .map((v) => `${baseUrl}${v}/`),
+];
+const versionLabels: Record<string, string> = {};
+const versionSelectOptions = [
+  ...versions.map((version) => ({
+    label: versionLabels[version] ?? version,
+    path: version === latestVersion ? baseUrl : `${baseUrl}${version}/`,
+  })),
+  { label: "Next", path: `${baseUrl}next/` },
+];
+const versionSelectHtml = `<select class="docs-version-select" aria-label="Docs version" onchange="window.location.href=this.value">
+  ${versionSelectOptions.map(({ label, path }) => `<option value="${path}">${label}</option>`).join("")}
+</select>`;
+
+function daggerWebFontsPlugin() {
+  return {
+    name: "dagger-webfonts",
+    injectHtmlTags() {
+      return {
+        headTags: [
+          {
+            tagName: "script",
+            attributes: {
+              src: "https://ajax.googleapis.com/ajax/libs/webfont/1.6.26/webfont.js",
+            },
+          },
+          {
+            tagName: "script",
+            attributes: {},
+            innerHTML: `
+              WebFont.load({
+                custom: {
+                  families: ["Hack", "Material Symbols Rounded"],
+                  urls: [
+                    "https://cdn.jsdelivr.net/npm/hack-font@3.3.0/build/web/hack.min.css",
+                    "https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:FILL@1"
+                  ]
+                },
+                google: {
+                  families: ["Open Sans:400,600,700", "Montserrat:400,600,700,800"]
+                }
+              });
+            `,
+          },
+        ],
+      };
+    },
+  };
+}
 
 const config: Config = {
   title: "Dagger",
@@ -20,7 +80,19 @@ const config: Config = {
   url: url,
   // Set the /<baseUrl>/ pathname under which your site is served
   // For GitHub pages deployment, it is often '/<projectName>/'
-  baseUrl: "/",
+  baseUrl,
+
+  future: {
+    experimental_faster: {
+      swcJsLoader: true,
+      swcJsMinimizer: true,
+      swcHtmlMinimizer: false,
+      lightningCssMinimizer: true,
+      mdxCrossCompilerCache: true,
+      rspackBundler: true,
+      rspackPersistentCache: true,
+    },
+  },
 
   // GitHub pages deployment config.
   // If you aren't using GitHub pages, you don't need these.
@@ -42,7 +114,7 @@ const config: Config = {
   },
   scripts: [
     {
-      src: "/js/commonroom.js",
+      src: `${baseUrl}js/commonroom.js`,
       async: true,
     },
   ],
@@ -52,8 +124,23 @@ const config: Config = {
       {
         docs: {
           breadcrumbs: false,
-          path: "./current_docs",
+          path: docsPath,
           routeBasePath: "/",
+          lastVersion: latestVersion,
+          versions: {
+            "0.21.4": {
+              label: "0.21.4",
+              path: "/",
+              banner: "none",
+              badge: false,
+            },
+            current: {
+              label: "Next",
+              path: "next",
+              banner: "unreleased",
+              badge: false,
+            },
+          },
           sidebarPath: "./sidebars.ts",
           sidebarCollapsible: true,
           editUrl: "https://github.com/dagger/dagger/edit/main/docs",
@@ -75,6 +162,7 @@ const config: Config = {
     ],
   ],
   plugins: [
+    daggerWebFontsPlugin,
     // Custom webpack configuration for path aliases
     function (context, options) {
       return {
@@ -83,40 +171,11 @@ const config: Config = {
           return {
             resolve: {
               alias: {
-                "@cookbookBuild": path.resolve(
-                  __dirname,
-                  "current_docs/partials/cookbook/builds"
-                ),
-                "@cookbookFilesystem": path.resolve(
-                  __dirname,
-                  "current_docs/partials/cookbook/filesystems"
-                ),
-                "@cookbookContainer": path.resolve(
-                  __dirname,
-                  "current_docs/partials/cookbook/containers"
-                ),
-                "@cookbookSecret": path.resolve(
-                  __dirname,
-                  "current_docs/partials/cookbook/secrets"
-                ),
-                "@cookbookService": path.resolve(
-                  __dirname,
-                  "current_docs/partials/cookbook/services"
-                ),
-                "@cookbookAgent": path.resolve(
-                  __dirname,
-                  "current_docs/partials/cookbook/agents"
-                ),
-                "@cookbookError": path.resolve(
-                  __dirname,
-                  "current_docs/partials/cookbook/errors"
-                ),
-                "@partials": path.resolve(__dirname, "current_docs/partials"),
+                "@components": path.resolve(__dirname, "src/components"),
                 "@daggerTypes": path.resolve(
                   __dirname,
-                  "current_docs/partials/types"
+                  "current_docs/partials/types",
                 ),
-                "@components": path.resolve(__dirname, "src/components"),
               },
             },
           };
@@ -126,7 +185,14 @@ const config: Config = {
     "docusaurus-plugin-sass",
     "docusaurus-plugin-image-zoom",
     // Thanks to @jharrell and Prisma team. Apache-2.0 content
-    llmsTxtPlugin,
+    [llmsTxtPlugin, { docsPath }],
+    // Parses docs-graphql/schema.graphqls into the model rendered by the
+    // API reference components on the type reference pages.
+    daggerApiReference,
+    // Builds a client-side search index over the current docs version. Pairs
+    // with the swizzled SearchBar (src/theme/SearchBar) for a local,
+    // command-palette search that needs no external service.
+    ["./plugins/local-search", { exclude: localSearchExclude }],
     [
       "posthog-docusaurus",
       {
@@ -135,47 +201,9 @@ const config: Config = {
         enableInDevelopment: true, // Enable tracking in development
       },
     ],
-    [
-      "docusaurus-plugin-typedoc",
-      {
-        id: "current-generation",
-        plugin: ["typedoc-plugin-markdown", "typedoc-plugin-frontmatter"],
-        entryPoints: [
-          "../sdk/typescript/src/connect.ts",
-          "../sdk/typescript/src/api/client.gen.ts",
-          "../sdk/typescript/src/common/errors/index.ts",
-        ],
-        tsconfig: "../sdk/typescript/tsconfig.json",
-        out: "current_docs/reference/typescript/",
-        excludeProtected: true,
-        exclude: "../sdk/typescript/node_modules/**",
-        skipErrorChecking: true,
-        disableSources: true,
-        sanitizeComments: true,
-        frontmatterGlobals: {
-          displayed_sidebar: "current",
-          sidebar_label: "TypeScript SDK Reference",
-          title: "TypeScript SDK Reference",
-        },
-        textContentMappings: {
-          "title.indexPage": "TypeScript SDK Reference",
-          "footer.text": "",
-        },
-        requiredToBeDocumented: ["Class"],
-      },
-    ],
   ],
   themes: ["@docusaurus/theme-mermaid"],
   themeConfig: {
-    // (jasonmccallister) leaving this in place for future use and reference
-    announcementBar: {
-      id: "new-docs-published-2025",
-      content:
-        `We've launched a brand-new docs site! 🎉 Still want the previous one? You can <a href="https://archive.docs.dagger.io/0.18/">find it in our archive</a>.`,
-      backgroundColor: "#131126",
-      textColor: "#ffffff",
-      isCloseable: true,
-    },
     sidebar: {
       autoCollapseCategories: false,
       hideable: false,
@@ -216,8 +244,8 @@ const config: Config = {
         "powershell",
         "java",
       ],
-      theme: prismThemes.oneLight,
-      darkTheme: prismThemes.oneDark,
+      theme: daggerDarkPrismTheme,
+      darkTheme: daggerDarkPrismTheme,
     },
     navbar: {
       logo: {
@@ -228,6 +256,17 @@ const config: Config = {
         srcDark: "img/dagger-logo-white.png",
       },
       items: [
+        {
+          type: "html",
+          position: "right",
+          className: "navbar-version-select-mobile",
+          value: versionSelectHtml,
+        },
+        {
+          type: "docsVersionDropdown",
+          position: "right",
+          className: "navbar-version-dropdown",
+        },
         // TODO(jasonmccallister): Add these items back in the nav or possible swizzle into a sidebar or toc?
         // {
         //   position: "right",
@@ -257,19 +296,14 @@ const config: Config = {
         },
       ],
     },
-    algolia: {
-      apiKey: "bffda1490c07dcce81a26a144115cc02",
-      indexName: "dagger",
-      appId: "XEIYPBWGOI",
-    },
     colorMode: {
       defaultMode: "light",
     },
     zoom: {
       selector: ".markdown img:not(.not-zoom)",
       background: {
-        light: "rgb(255, 255, 255)",
-        dark: "rgb(50, 50, 50)",
+        light: "var(--color-white)",
+        dark: "var(--color-backgroundDark)",
       },
       // medium-zoom configuration options
       // Refer to https://github.com/francoischalifour/medium-zoom#options

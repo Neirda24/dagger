@@ -11,7 +11,7 @@ namespace Dagger;
 /**
  * A definition of a custom enum defined in a Module.
  */
-class EnumTypeDef extends Client\AbstractObject implements Client\IdAble
+class EnumTypeDef extends Client\AbstractObject implements Client\IdAble, Node
 {
     /**
      * A doc string for the enum, if any.
@@ -25,10 +25,10 @@ class EnumTypeDef extends Client\AbstractObject implements Client\IdAble
     /**
      * A unique identifier for this EnumTypeDef.
      */
-    public function id(): EnumTypeDefId
+    public function id(): Id
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('id');
-        return new \Dagger\EnumTypeDefId((string)$this->queryLeaf($leafQueryBuilder, 'id'));
+        return new \Dagger\Id((string)$this->queryLeaf($leafQueryBuilder, 'id'));
     }
 
     /**
@@ -67,6 +67,9 @@ class EnumTypeDef extends Client\AbstractObject implements Client\IdAble
         return (string)$this->queryLeaf($leafQueryBuilder, 'sourceModuleName');
     }
 
+    /**
+     * The members of the enum.
+     */
     public function values(): array
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('values');

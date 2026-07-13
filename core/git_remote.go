@@ -19,11 +19,9 @@ import (
 	"time"
 
 	ctdmount "github.com/containerd/containerd/v2/core/mount"
-	bkcache "github.com/dagger/dagger/internal/buildkit/cache"
+	bkcache "github.com/dagger/dagger/engine/snapshots"
 	bkclient "github.com/dagger/dagger/internal/buildkit/client"
 	"github.com/dagger/dagger/internal/buildkit/executor/oci"
-	bksession "github.com/dagger/dagger/internal/buildkit/session"
-	"github.com/dagger/dagger/internal/buildkit/snapshot"
 	"github.com/dagger/dagger/util/cleanups"
 	"github.com/dagger/dagger/util/gitutil"
 	"github.com/moby/sys/mount"
@@ -31,8 +29,8 @@ import (
 
 	"github.com/dagger/dagger/dagql"
 	"github.com/dagger/dagger/engine"
-	"github.com/dagger/dagger/engine/buildkit"
 	"github.com/dagger/dagger/engine/slog"
+	"github.com/dagger/dagger/internal/buildkit/util/tracing"
 	"github.com/dagger/dagger/network"
 	"github.com/dagger/dagger/util/hashutil"
 	telemetry "github.com/dagger/otel-go"
@@ -50,9 +48,12 @@ type RemoteGitRepository struct {
 	AuthUsername string
 	AuthToken    dagql.ObjectResult[*Secret]
 	AuthHeader   dagql.ObjectResult[*Secret]
+	Mirror       dagql.ObjectResult[*RemoteGitMirror]
 }
 
 var _ GitRepositoryBackend = (*RemoteGitRepository)(nil)
+
+const remoteGitLockPrefix = "git-remote::"
 
 type RemoteGitRef struct {
 	*gitutil.Ref
@@ -67,21 +68,22 @@ func (repo *RemoteGitRepository) Remote(ctx context.Context) (result *gitutil.Re
 
 	slog := slog.SpanLogger(ctx, InstrumentationLibrary)
 
-	srv, err := CurrentDagqlServer(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("query server: %w", err)
-	}
 	cacheKey, err := repo.remoteCacheKey(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("remote git repository %q: %w", repo.URL.Remote(), err)
 	}
 
-	if srv == nil || srv.Cache == nil {
+	cache, err := dagql.EngineCache(ctx)
+	if err != nil {
 		slog.Info("git remote cache unavailable; running ls-remote", "cache_key", cacheKey)
 		return repo.runLsRemote(ctx)
 	}
+	clientMetadata, err := engine.ClientMetadataFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("git remote cache session metadata: %w", err)
+	}
 
-	cacheRes, err := srv.Cache.GetOrInitArbitrary(ctx, cacheKey, func(ctx context.Context) (any, error) {
+	cacheRes, err := cache.GetOrInitArbitrary(ctx, clientMetadata.SessionID, cacheKey, func(ctx context.Context) (any, error) {
 		remote, err := repo.runLsRemote(ctx)
 		if err != nil {
 			return nil, err
@@ -145,17 +147,23 @@ func (repo *RemoteGitRepository) remoteCacheKey(ctx context.Context) (string, er
 // instead of being too smart, we just scope the cache key to the auth configuration: less chance of cache poisoning
 func (repo *RemoteGitRepository) remoteCacheScope() []string {
 	scope := make([]string, 0, 4)
-	if token := repo.AuthToken; token.Self() != nil && token.ID() != nil {
-		scope = append(scope, "token:"+SecretIDDigest(token.ID()).String())
+	if token := repo.AuthToken; token.Self() != nil {
+		if tokenHandle := token.Self().Handle; tokenHandle != "" {
+			scope = append(scope, "token:"+string(tokenHandle))
+		}
 	}
-	if header := repo.AuthHeader; header.Self() != nil && header.ID() != nil {
-		scope = append(scope, "header:"+SecretIDDigest(header.ID()).String())
+	if header := repo.AuthHeader; header.Self() != nil {
+		if headerHandle := header.Self().Handle; headerHandle != "" {
+			scope = append(scope, "header:"+string(headerHandle))
+		}
 	}
 	if repo.AuthUsername != "" {
 		scope = append(scope, "username:"+repo.AuthUsername)
 	}
 	if sshSock := repo.SSHAuthSocket; sshSock.Self() != nil {
-		scope = append(scope, "ssh-auth-scope:"+sshSock.Self().IDDigest.String())
+		if sshHandle := sshSock.Self().Handle; sshHandle != "" {
+			scope = append(scope, "ssh-auth-scope:"+string(sshHandle))
+		}
 	}
 	return scope
 }
@@ -213,15 +221,12 @@ func (repo *RemoteGitRepository) setup(ctx context.Context) (_ *gitutil.GitCLI, 
 	}()
 
 	if repo.SSHAuthSocket.Self() != nil {
-		socketStore, err := query.Sockets(ctx)
-		if err == nil {
-			sockpath, cleanup, err := socketStore.MountSocket(ctx, repo.SSHAuthSocket.Self().IDDigest)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to mount SSH socket: %w", err)
-			}
-			opts = append(opts, gitutil.WithSSHAuthSock(sockpath))
-			cleanups.Add("cleanup SSH socket", cleanup)
+		sockpath, cleanup, err := repo.SSHAuthSocket.Self().MountSSHAgent(ctx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to mount SSH socket: %w", err)
 		}
+		opts = append(opts, gitutil.WithSSHAuthSock(sockpath))
+		cleanups.Add("cleanup SSH socket", cleanup)
 	}
 
 	var knownHostsPath string
@@ -255,21 +260,13 @@ func (repo *RemoteGitRepository) setup(ctx context.Context) (_ *gitutil.GitCLI, 
 	}
 
 	if repo.AuthToken.Self() != nil {
-		secretStore, err := query.Secrets(ctx)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to get secret store: %w", err)
-		}
-		password, err := secretStore.GetSecretPlaintext(ctx, SecretIDDigest(repo.AuthToken.ID()))
+		password, err := repo.AuthToken.Self().Plaintext(ctx)
 		if err != nil {
 			return nil, nil, err
 		}
 		opts = append(opts, gitutil.WithHTTPTokenAuth(repo.URL, string(password), repo.AuthUsername))
 	} else if repo.AuthHeader.Self() != nil {
-		secretStore, err := query.Secrets(ctx)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to get secret store: %w", err)
-		}
-		byteAuthHeader, err := secretStore.GetSecretPlaintext(ctx, SecretIDDigest(repo.AuthHeader.ID()))
+		byteAuthHeader, err := repo.AuthHeader.Self().Plaintext(ctx)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -284,8 +281,7 @@ func (repo *RemoteGitRepository) setup(ctx context.Context) (_ *gitutil.GitCLI, 
 }
 
 func (repo *RemoteGitRepository) mount(ctx context.Context, depth int, includeTags bool, refs []GitRefBackend, fn func(*gitutil.GitCLI) error) (retErr error) {
-	g, _ := buildkit.CurrentBuildkitSessionGroup(ctx)
-	return repo.initRemote(ctx, g, func(remote string) error {
+	return repo.initRemote(ctx, func(remote string) error {
 		git, cleanup, err := repo.setup(ctx)
 		if err != nil {
 			return err
@@ -337,7 +333,6 @@ func (repo *RemoteGitRepository) mount(ctx context.Context, depth int, includeTa
 				fetchRefs = append(fetchRefs, ref)
 			}
 		}
-
 		err = repo.fetch(ctx, git, depth, includeTags, fetchRefs)
 		if err != nil {
 			return err
@@ -351,7 +346,7 @@ func (repo *RemoteGitRepository) mount(ctx context.Context, depth int, includeTa
 	})
 }
 
-func (repo *RemoteGitRepository) fetch(ctx context.Context, git *gitutil.GitCLI, depth int, includeTags bool, refs []*RemoteGitRef) error {
+func (repo *RemoteGitRepository) fetch(ctx context.Context, git *gitutil.GitCLI, depth int, includeTags bool, refs []*RemoteGitRef) (rerr error) {
 	query, err := CurrentQuery(ctx)
 	if err != nil {
 		return err
@@ -361,6 +356,15 @@ func (repo *RemoteGitRepository) fetch(ctx context.Context, git *gitutil.GitCLI,
 		// Nothing requested: avoid an implicit broad fetch from origin.
 		return nil
 	}
+
+	// Encapsulated like the resolver's "pulling" span: hidden unless it
+	// fails, surfacing as a labeled progress row only when objects actually
+	// transfer (an up-to-date repo skips fetching entirely).
+	span, ctx := tracing.StartSpan(ctx, "fetching "+repo.URL.Remote(), telemetry.Encapsulated(), telemetry.Encapsulate())
+	defer func() {
+		tracing.FinishWithError(span, rerr)
+	}()
+	git = git.New(gitutil.WithStreams(gitFetchProgressStreams(ctx)))
 
 	// Fetch by object SHA in the hot path (`--no-tags`), and only retry by named refs for SHA-incompatible remotes.
 	logger := slog.SpanLogger(ctx, InstrumentationLibrary)
@@ -379,6 +383,9 @@ func (repo *RemoteGitRepository) fetch(ctx context.Context, git *gitutil.GitCLI,
 	runFetch := func(refSpecs []string) error {
 		args := []string{
 			"fetch",
+			// stderr is not a tty, so sideband transfer progress (parsed by
+			// gitProgressWriter) needs asking for
+			"--progress",
 			"--no-tags",
 			"--update-head-ok",
 			"--force",
@@ -411,6 +418,20 @@ func (repo *RemoteGitRepository) fetch(ctx context.Context, git *gitutil.GitCLI,
 	runFetchTags := func() error {
 		// Keep the hot path tag-free and only hydrate local tag refs when explicitly requested.
 		return runFetch([]string{"refs/tags/*:refs/tags/*"})
+	}
+
+	cleanupScratchFetchRefs := func(refSpecs []string) {
+		cleanupGit := git.New(
+			gitutil.WithIgnoreError(),
+			gitutil.WithGitDir(gitDir),
+		)
+		for _, refSpec := range refSpecs {
+			_, dst, ok := strings.Cut(refSpec, ":")
+			if !ok || dst == "" {
+				continue
+			}
+			_, _ = cleanupGit.Run(ctx, "update-ref", "-d", dst)
+		}
 	}
 
 	verifyFetchedSHAs := func(expectedRefs []*RemoteGitRef) error {
@@ -450,6 +471,7 @@ func (repo *RemoteGitRepository) fetch(ctx context.Context, git *gitutil.GitCLI,
 			if len(namedSpecs) == 0 {
 				return fmt.Errorf("failed to fetch remote %s: %w", repo.URL.Remote(), err)
 			}
+			defer cleanupScratchFetchRefs(namedSpecs)
 
 			logger.Debug("git fetch by sha failed; retrying with named refs", "remote", repo.URL.Remote(), "refspec_count", len(namedSpecs))
 			if retryErr := runFetch(namedSpecs); retryErr != nil {
@@ -486,59 +508,30 @@ func namedFetchRefSpecs(refs []*RemoteGitRef) []string {
 	return refSpecs
 }
 
-func (repo *RemoteGitRepository) initRemote(ctx context.Context, g bksession.Group, fn func(string) error) (retErr error) {
+func (repo *RemoteGitRepository) initRemote(ctx context.Context, fn func(string) error) (retErr error) {
 	query, err := CurrentQuery(ctx)
 	if err != nil {
 		return err
 	}
 	locker := query.Locker()
-	locker.Lock(indexGitRemote + repo.URL.Remote())
-	defer locker.Unlock(indexGitRemote + repo.URL.Remote())
+	locker.Lock(remoteGitLockPrefix + repo.URL.Remote())
+	defer locker.Unlock(remoteGitLockPrefix + repo.URL.Remote())
 
-	cache := query.BuildkitCache()
-
-	sis, err := searchGitRemote(ctx, cache, repo.URL.Remote())
+	if repo.Mirror.Self() == nil {
+		return fmt.Errorf("remote git mirror is nil for %s", repo.URL.Remote())
+	}
+	remoteRef, releaseMirror, err := repo.Mirror.Self().acquire(ctx, query)
 	if err != nil {
-		return fmt.Errorf("failed to search metadata for %s: %w", repo.URL.Remote(), err)
+		return err
 	}
+	defer releaseMirror()
 
-	var remoteRef bkcache.MutableRef
-	for _, si := range sis {
-		remoteRef, err = cache.GetMutable(ctx, si.ID())
-		if err != nil {
-			if errors.Is(err, bkcache.ErrLocked) {
-				// should never really happen as no other function should access this metadata, but lets be graceful
-				slog.Warn("mutable ref for %s  %s was locked: %v", repo.URL.Remote(), si.ID(), err)
-				continue
-			}
-			return fmt.Errorf("failed to get mutable ref for %s: %w", repo.URL.Remote(), err)
-		}
-		break
-	}
-
-	initializeRepo := false
-	if remoteRef == nil {
-		remoteRef, err = cache.New(ctx, nil, g,
-			bkcache.CachePolicyRetain,
-			bkcache.WithDescription(fmt.Sprintf("shared git repo for %s", repo.URL.Remote())))
-		if err != nil {
-			return fmt.Errorf("failed to create new mutable for %s: %w", repo.URL.Remote(), err)
-		}
-		initializeRepo = true
-	}
-	defer func() {
-		err := remoteRef.Release(context.WithoutCancel(ctx))
-		if retErr == nil {
-			retErr = err
-		}
-	}()
-
-	mount, err := remoteRef.Mount(ctx, false, g)
+	mount, err := remoteRef.Mount(ctx, false)
 	if err != nil {
 		return err
 	}
 
-	lm := snapshot.LocalMounter(mount)
+	lm := bkcache.LocalMounter(mount)
 	dir, err := lm.Mount()
 	if err != nil {
 		return err
@@ -551,12 +544,17 @@ func (repo *RemoteGitRepository) initRemote(ctx context.Context, g bksession.Gro
 	}()
 
 	git := gitutil.NewGitCLI(gitutil.WithGitDir(dir))
-
+	initializeRepo := false
+	if _, err := os.Lstat(filepath.Join(dir, "HEAD")); errors.Is(err, os.ErrNotExist) {
+		initializeRepo = true
+	} else if err != nil {
+		return err
+	}
 	if initializeRepo {
 		// Explicitly set the Git config 'init.defaultBranch' to the
 		// implied default to suppress "hint:" output about not having a
+		// default initial branch name set, which otherwise spams unit
 		// test logs.
-		// default initial branch name set which otherwise spams unit
 		if _, err := git.Run(ctx, "-c", "init.defaultBranch=main", "init", "--bare", "--quiet"); err != nil {
 			return fmt.Errorf("failed to init repo at %s: %w", dir, err)
 		}
@@ -564,42 +562,17 @@ func (repo *RemoteGitRepository) initRemote(ctx context.Context, g bksession.Gro
 		if _, err := git.Run(ctx, "remote", "add", "origin", repo.URL.Remote()); err != nil {
 			return fmt.Errorf("failed add origin repo at %s: %w", dir, err)
 		}
-
-		// save new remote metadata
-		md := cacheRefMetadata{remoteRef}
-		if err := md.setGitRemote(repo.URL.Remote()); err != nil {
-			return err
-		}
 	}
 
 	return fn(dir)
 }
 
 func (ref *RemoteGitRef) Tree(ctx context.Context, srv *dagql.Server, discardGitDir bool, depth int, includeTags bool) (_ *Directory, rerr error) {
-	cacheKey := dagql.CurrentID(ctx).Digest().Encoded()
-
 	query, err := CurrentQuery(ctx)
 	if err != nil {
 		return nil, err
 	}
-	cache := query.BuildkitCache()
-
-	locker := query.Locker()
-	locker.Lock(indexGitSnapshot + cacheKey)
-	defer locker.Unlock(indexGitSnapshot + cacheKey)
-	sis, err := searchGitSnapshot(ctx, cache, cacheKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to search metadata for %s: %w", cacheKey, err)
-	}
-	if len(sis) > 0 {
-		res, err := cache.Get(ctx, sis[0].ID(), nil)
-		if err != nil {
-			return nil, err
-		}
-		checkout := NewDirectory(nil, "/", query.Platform(), nil)
-		checkout.Result = res
-		return checkout, nil
-	}
+	cache := query.SnapshotManager()
 
 	var checkoutRef bkcache.MutableRef
 	defer func() {
@@ -608,25 +581,20 @@ func (ref *RemoteGitRef) Tree(ctx context.Context, srv *dagql.Server, discardGit
 		}
 	}()
 
-	bkSessionGroup, ok := buildkit.CurrentBuildkitSessionGroup(ctx)
-	if !ok {
-		return nil, fmt.Errorf("no buildkit session group in context")
-	}
 	err = ref.mount(ctx, depth, includeTags, func(git *gitutil.GitCLI) error {
 		gitURL, err := git.URL(ctx)
 		if err != nil {
 			return fmt.Errorf("could not find git dir: %w", err)
 		}
 
-		checkoutRef, err = cache.New(ctx, nil, bkSessionGroup,
-			bkcache.CachePolicyRetain,
-			bkcache.WithRecordType(bkclient.UsageRecordTypeRegular),
+		checkoutRef, err = cache.New(ctx, nil,
+			bkcache.WithRecordType(bkclient.UsageRecordTypeGitCheckout),
 			bkcache.WithDescription(fmt.Sprintf("git checkout for %s (%s %s)", ref.repo.URL.Remote(), ref.Name, ref.SHA)))
 		if err != nil {
 			return err
 		}
 
-		err = MountRef(ctx, checkoutRef, bkSessionGroup, func(checkoutDir string, _ *ctdmount.Mount) error {
+		err = MountRef(ctx, checkoutRef, func(checkoutDir string, _ *ctdmount.Mount) error {
 			checkoutDirGit := filepath.Join(checkoutDir, ".git")
 			if err := os.MkdirAll(checkoutDir, 0711); err != nil {
 				return err
@@ -655,15 +623,14 @@ func (ref *RemoteGitRef) Tree(ctx context.Context, srv *dagql.Server, discardGit
 			snap.Release(context.WithoutCancel(ctx))
 		}
 	}()
-
-	md := cacheRefMetadata{snap}
-	if err := md.setGitSnapshot(cacheKey); err != nil {
-		return nil, err
+	dir := &Directory{
+		Platform: query.Platform(),
+		Dir:      new(LazyAccessor[string, *Directory]),
+		Snapshot: new(LazyAccessor[bkcache.ImmutableRef, *Directory]),
 	}
-
-	checkout := NewDirectory(nil, "/", query.Platform(), nil)
-	checkout.Result = snap
-	return checkout, nil
+	dir.Dir.setValue("/")
+	dir.Snapshot.setValue(snap)
+	return dir, nil
 }
 
 func (ref *RemoteGitRef) mount(ctx context.Context, depth int, includeTags bool, fn func(*gitutil.GitCLI) error) error {
@@ -766,7 +733,7 @@ func runWithStandardUmaskAndNetOverride(ctx context.Context, cmd *exec.Cmd, host
 // unshareAndRun needs to be called in a locked thread.
 func unshareAndRun(ctx context.Context, cmd *exec.Cmd, hosts, resolv string, cleanMntNS *os.File) error {
 	// avoid leaking mounts from the engine by using an isolated clean mount namespace (see container start code,
-	// currently in engine/buildkit/executor_spec.go, for more details)
+	// currently in engine/engineutil/executor_spec.go, for more details)
 	if err := unix.Unshare(unix.CLONE_FS); err != nil {
 		return fmt.Errorf("unshare fs attrs: %w", err)
 	}

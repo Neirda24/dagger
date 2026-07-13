@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/dagger/dagger/core"
+	"github.com/dagger/dagger/core/sdk/sdkmeta"
 	"github.com/dagger/dagger/dagql"
 	"github.com/dagger/dagger/engine"
 	"github.com/dagger/dagger/engine/distconsts"
@@ -25,6 +26,12 @@ type Loader struct{}
 
 func NewLoader() *Loader {
 	return &Loader{}
+}
+
+func init() {
+	core.SetModuleSourceSDKLoader(func(ctx context.Context, query *core.Query, sdkCfg *core.SDKConfig, src *core.ModuleSource) (core.SDK, error) {
+		return NewLoader().SDKForModule(ctx, query, sdkCfg, src)
+	})
 }
 
 // SDKForModule loads an SDK module based on the given SDK configuration.
@@ -65,7 +72,7 @@ func (l *Loader) SDKForModule(
 	fmt.Fprintln(stdio.Stderr, "-", extErr)
 	fmt.Fprintln(stdio.Stderr)
 	fmt.Fprintln(stdio.Stderr, "The available SDKs are:")
-	for _, sdk := range validInbuiltSDKs {
+	for _, sdk := range sdkmeta.Builtins {
 		fmt.Fprintln(stdio.Stderr, "-", sdk)
 	}
 	fmt.Fprintln(stdio.Stderr, "- any git module ref, e.g. github.com/dagger/dagger/sdk/elixir@main")
@@ -84,9 +91,9 @@ func (l *Loader) externalSDKForModule(
 	sdk *core.SDKConfig,
 	parentSrc *core.ModuleSource,
 ) (core.SDK, error) {
-	bk, err := query.Buildkit(ctx)
+	bk, err := query.Engine(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get buildkit for sdk %s: %w", sdk.Source, err)
+		return nil, fmt.Errorf("failed to get engine client for sdk %s: %w", sdk.Source, err)
 	}
 	dag, err := query.Server.Server(ctx)
 	if err != nil {
@@ -134,12 +141,16 @@ func (l *Loader) namedSDK(
 		return l.loadBuiltinSDK(ctx, root, sdk, digest.Digest(os.Getenv(distconsts.PythonSDKManifestDigestEnvName)))
 	case sdkTypescript:
 		return l.loadBuiltinSDK(ctx, root, sdk, digest.Digest(os.Getenv(distconsts.TypescriptSDKManifestDigestEnvName)))
-	case sdkJava:
-		return l.SDKForModule(ctx, root, &core.SDKConfig{Source: "github.com/dagger/dagger/sdk/java" + sdkSuffix, Config: sdk.Config, Experimental: sdk.Experimental}, nil)
-	case sdkPHP:
-		return l.SDKForModule(ctx, root, &core.SDKConfig{Source: "github.com/dagger/dagger/sdk/php" + sdkSuffix, Config: sdk.Config, Experimental: sdk.Experimental}, nil)
-	case sdkElixir:
-		return l.SDKForModule(ctx, root, &core.SDKConfig{Source: "github.com/dagger/dagger/sdk/elixir" + sdkSuffix, Config: sdk.Config, Experimental: sdk.Experimental}, nil)
+	case sdkJava, sdkPHP, sdkElixir:
+		sdkMod, ok := workspaceModuleForBuiltinSDK(sdkNamedParsed, sdkSuffix)
+		if !ok {
+			return nil, errUnknownBuiltinSDK
+		}
+		return l.SDKForModule(ctx, root, &core.SDKConfig{
+			Source:       sdkMod.Source,
+			Config:       sdk.Config,
+			Experimental: sdk.Experimental,
+		}, nil)
 	}
 
 	return nil, errUnknownBuiltinSDK
@@ -221,7 +232,7 @@ func parseSDKName(sdkName string) (sdk, string, error) {
 
 	// this validation may seem redundant, but it helps keep the list of
 	// builtin sdk between invalidSDKError message and builtinSDK function in sync.
-	if !slices.Contains(validInbuiltSDKs, sdk(sdkNameParsed)) {
+	if !sdkmeta.IsBuiltin(sdkNameParsed) {
 		return "", "", errUnknownBuiltinSDK
 	}
 
@@ -241,4 +252,14 @@ func parseSDKName(sdkName string) (sdk, string, error) {
 	}
 
 	return sdk(sdkNameParsed), sdkSuffix, nil
+}
+
+// IsBuiltinSDKName reports whether source names a built-in SDK/runtime bundled
+// in the engine (e.g. "go", "python", "dang"), optionally with an "@version"
+// suffix — as opposed to an external module ref or local path. Such names are
+// resolved in-engine when a module's runtime loads; they are not standalone
+// modules that can be loaded from a path or ref.
+func IsBuiltinSDKName(source string) bool {
+	name, _, _ := strings.Cut(source, "@")
+	return sdkmeta.IsBuiltin(name)
 }

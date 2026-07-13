@@ -1,5 +1,14 @@
 package core
 
+// These tests cover `dagger generate`, which runs module generator functions
+// that write files back to the caller's workspace. They verify listing and
+// running generators from SDK modules, legacy compat blueprints, and
+// workspace-installed modules.
+//
+// See also:
+// - checks_test.go: check discovery and execution.
+// - workspace_modules_test.go: installing modules into workspaces.
+
 import (
 	"context"
 	"strings"
@@ -115,7 +124,7 @@ func (GeneratorsSuite) TestGeneratorsDirectSDK(ctx context.Context, t *testctx.T
 	}
 }
 
-func (GeneratorsSuite) TestGeneratorsAsBlueprint(ctx context.Context, t *testctx.T) {
+func (GeneratorsSuite) TestGeneratorsViaLegacyBlueprintConfig(ctx context.Context, t *testctx.T) {
 	c := connect(ctx, t)
 	for _, tc := range []struct {
 		name string
@@ -130,7 +139,7 @@ func (GeneratorsSuite) TestGeneratorsAsBlueprint(ctx context.Context, t *testctx
 			modGen, err := generatorsTestEnv(t, c)
 			require.NoError(t, err)
 			modGen = modGen.WithWorkdir("app").
-				With(daggerExec("init", "--blueprint", "../"+tc.path))
+				WithNewFile("dagger.json", `{"name":"app","blueprint":{"name":"blueprint","source":"../`+tc.path+`"}}`)
 
 			t.Run("list", func(ctx context.Context, t *testctx.T) {
 				out, err := modGen.
@@ -168,7 +177,7 @@ func (GeneratorsSuite) TestGeneratorsAsBlueprint(ctx context.Context, t *testctx
 	}
 }
 
-func (GeneratorsSuite) TestGeneratorsAsToolchain(ctx context.Context, t *testctx.T) {
+func (GeneratorsSuite) TestGeneratorsInstalledInWorkspace(ctx context.Context, t *testctx.T) {
 	c := connect(ctx, t)
 	for _, tc := range []struct {
 		name string
@@ -184,8 +193,9 @@ func (GeneratorsSuite) TestGeneratorsAsToolchain(ctx context.Context, t *testctx
 			require.NoError(t, err)
 			modGen = modGen.
 				WithWorkdir("app").
-				With(daggerExec("init")).
-				With(daggerExec("toolchain", "install", "../"+tc.path))
+				// Workspace creation is implicit on first install; the
+				// `dagger workspace init` verb was removed in CLI 1.0.
+				With(daggerExec("install", "../"+tc.path))
 
 			t.Run("list", func(ctx context.Context, t *testctx.T) {
 				out, err := modGen.
@@ -223,6 +233,206 @@ func (GeneratorsSuite) TestGeneratorsAsToolchain(ctx context.Context, t *testctx
 	}
 }
 
+func (GeneratorsSuite) TestGeneratorGroupChangesSyncWithNestedSDKCodegen(ctx context.Context, t *testctx.T) {
+	c := connect(ctx, t)
+
+	modGen := goGitBase(t, c).
+		WithEnvVariable("_EXPERIMENTAL_DAGGER_CLI_BIN", testCLIBinPath).
+		With(nonNestedDevEngine(c)).
+		WithNewFile("dagger.toml", `[modules.consumer]
+source = ".dagger/modules/consumer"
+entrypoint = true
+
+[modules.go-sdk]
+source = "github.com/dagger/go-sdk"
+
+[modules.go-sdk.as-sdk]
+name = "go"
+`).
+		WithNewFile(".dagger/modules/consumer/dagger.json", `{
+  "name": "consumer",
+  "engineVersion": "latest",
+  "sdk": { "source": "go" },
+  "source": "."
+}`).
+		WithNewFile(".dagger/modules/consumer/main.go", `package main
+
+import (
+	"context"
+
+	"dagger/consumer/internal/dagger"
+)
+
+type Consumer struct{}
+
+func (m *Consumer) SyncGenerators(ctx context.Context, workspace *dagger.Workspace) (string, error) {
+	generatorChanges, err := workspace.
+		Generators().
+		Run().
+		Changes(dagger.GeneratorGroupChangesOpts{
+			OnConflict: dagger.ChangesetsMergeConflictFailEarly,
+		}).
+		Sync(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	_, err = dag.Changeset().
+		WithChangesets([]*dagger.Changeset{
+			generatorChanges,
+			workspace.ClientGenerate(),
+		}, dagger.ChangesetWithChangesetsOpts{
+			OnConflict: dagger.ChangesetsMergeConflictFailEarly,
+		}).
+		Sync(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	return "ok", nil
+}
+`)
+
+	// This mirrors the generated Go SDK contract used by `dagger generate`:
+	// generator changes from nested SDK/codegen are merged with client-generation
+	// changes, then the merged changeset is synced.
+	out, err := modGen.
+		With(daggerNonNestedExec("call", "sync-generators")).
+		CombinedOutput(ctx)
+	require.NoError(t, err, out)
+	require.Contains(t, out, "ok")
+	require.NotContains(t, out, "result *core.Changeset is detached")
+}
+
+// TestWorkspaceGenerateNarrowsToRequestedModule locks in that
+// `dagger generate <module>` only loads the named generator's module. The
+// workspace generators resolver loads modules on demand from its include
+// argument, so an unrelated broken/stale workspace module is never loaded just
+// to enumerate generators and cannot block regenerating a healthy module --
+// including the case where running generate is itself the fix for the broken
+// module.
+//
+// See also TestSingleQueryWorkspaceModuleLoadingSkipsUnreferencedBrokenModules
+// in workspace_test.go, which covers the root-field demand path for raw
+// queries.
+func (GeneratorsSuite) TestWorkspaceGenerateNarrowsToRequestedModule(ctx context.Context, t *testctx.T) {
+	c := connect(ctx, t)
+
+	base := workspaceFixture(t, c, "generators-broken")
+
+	t.Run("listing only the healthy module skips the broken one", func(ctx context.Context, t *testctx.T) {
+		out, err := base.
+			With(daggerExec("generate", "-l", "good")).
+			CombinedOutput(ctx)
+		require.NoError(t, err)
+		require.NotContains(t, out, "intentionally invalid")
+	})
+
+	t.Run("generating only the healthy module succeeds", func(ctx context.Context, t *testctx.T) {
+		// generate -y is multi-request (list, then run+apply); the later
+		// requests must keep recognizing the already-loaded module instead of
+		// falling back to loading everything.
+		out, err := base.
+			With(daggerExec("generate", "good", "-y", "--progress=plain")).
+			CombinedOutput(ctx)
+		require.NoError(t, err)
+		require.NotContains(t, out, "no changes to apply")
+		require.NotContains(t, out, "intentionally invalid")
+	})
+
+	t.Run("generating across all modules still loads the broken module", func(ctx context.Context, t *testctx.T) {
+		out, err := base.
+			With(daggerExecFail("generate", "-l")).
+			CombinedOutput(ctx)
+		require.NoError(t, err)
+		require.Contains(t, out, "bad")
+	})
+}
+
+// TestWorkspaceCheckNarrowsToRequestedModule mirrors
+// TestWorkspaceGenerateNarrowsToRequestedModule for `dagger check`: an unrelated
+// broken/stale workspace module must not be loaded just to enumerate or run a
+// healthy module's checks, so it cannot block checking that module.
+func (GeneratorsSuite) TestWorkspaceCheckNarrowsToRequestedModule(ctx context.Context, t *testctx.T) {
+	c := connect(ctx, t)
+
+	base := workspaceFixture(t, c, "generators-broken")
+
+	t.Run("listing only the healthy module skips the broken one", func(ctx context.Context, t *testctx.T) {
+		out, err := base.
+			With(daggerExec("check", "-l", "good")).
+			CombinedOutput(ctx)
+		require.NoError(t, err)
+		require.NotContains(t, out, "intentionally invalid")
+	})
+
+	t.Run("running only the healthy module's checks succeeds", func(ctx context.Context, t *testctx.T) {
+		// --no-generate runs only annotated checks; generate-as-checks are
+		// excluded because the healthy module's generator legitimately reports
+		// pending output (covered by the generate narrowing test), which is
+		// unrelated to whether the broken module was loaded.
+		out, err := base.
+			With(daggerExec("check", "good", "--no-generate", "--progress=plain")).
+			CombinedOutput(ctx)
+		require.NoError(t, err)
+		require.NotContains(t, out, "intentionally invalid")
+	})
+
+	t.Run("checking across all modules still loads the broken module", func(ctx context.Context, t *testctx.T) {
+		out, err := base.
+			With(daggerExecFail("check", "-l")).
+			CombinedOutput(ctx)
+		require.NoError(t, err)
+		require.Contains(t, out, "bad")
+	})
+}
+
+// TestWorkspaceUpNarrowsToRequestedModule mirrors
+// TestWorkspaceGenerateNarrowsToRequestedModule for `dagger up`: an unrelated
+// broken/stale workspace module must not be loaded just to enumerate a healthy
+// module's services. `dagger up` starts services and blocks, so the assertions
+// use list mode (-l), which still loads workspace modules to enumerate services
+// and thus exercises the same narrowing.
+func (GeneratorsSuite) TestWorkspaceUpNarrowsToRequestedModule(ctx context.Context, t *testctx.T) {
+	c := connect(ctx, t)
+
+	base := workspaceFixture(t, c, "generators-broken")
+
+	t.Run("listing only the healthy module skips the broken one", func(ctx context.Context, t *testctx.T) {
+		out, err := base.
+			With(daggerExec("up", "-l", "good")).
+			CombinedOutput(ctx)
+		require.NoError(t, err)
+		require.NotContains(t, out, "intentionally invalid")
+	})
+
+	t.Run("listing across all modules still loads the broken module", func(ctx context.Context, t *testctx.T) {
+		out, err := base.
+			With(daggerExecFail("up", "-l")).
+			CombinedOutput(ctx)
+		require.NoError(t, err)
+		require.Contains(t, out, "bad")
+	})
+}
+
+func (GeneratorsSuite) TestWorkspaceGenerateSkip(ctx context.Context, t *testctx.T) {
+	c := connect(ctx, t)
+
+	modGen, err := generatorsTestEnv(t, c)
+	require.NoError(t, err)
+
+	ctr := modGen.WithNewFile("dagger.toml", `[modules.hello-with-generators]
+source = "hello-with-generators"
+generate.skip = ["generate-other-files", "other-generators:*"]
+`)
+
+	listOut, err := ctr.With(daggerExec("generate", "-l")).CombinedOutput(ctx)
+	require.NoError(t, err)
+	require.Contains(t, listOut, "hello-with-generators:generate-files")
+	require.NotContains(t, listOut, "hello-with-generators:generate-other-files")
+	require.NotContains(t, listOut, "hello-with-generators:other-generators:gen-things")
+}
+
 func (GeneratorsSuite) TestWorkspaceGeneratorsVisibleFromModule(ctx context.Context, t *testctx.T) {
 	c := connect(ctx, t)
 	modGen, err := generatorsTestEnv(t, c)
@@ -230,79 +440,17 @@ func (GeneratorsSuite) TestWorkspaceGeneratorsVisibleFromModule(ctx context.Cont
 
 	out, err := modGen.
 		WithWorkdir("hello-with-generators").
-		With(daggerExec("toolchain", "install", "./toolchain")).
+		WithNewFile("dagger.toml", `[modules.hello-with-generators]
+source = "."
+entrypoint = true
+
+[modules.toolchain-generators]
+source = "toolchain"
+`).
 		With(daggerCall("workspace-generators-empty")).
 		Stdout(ctx)
 	require.NoError(t, err)
 	require.Equal(t, "false", strings.TrimSpace(out))
-}
-
-func (GeneratorsSuite) TestToolchainIgnoreGenerators(ctx context.Context, t *testctx.T) {
-	c := connect(ctx, t)
-
-	modGen, err := generatorsTestEnv(t, c)
-	require.NoError(t, err)
-	modGen = modGen.
-		WithWorkdir("app").
-		With(daggerExec("init")).
-		With(daggerExec("toolchain", "install", "../hello-with-generators"))
-
-	out, err := modGen.
-		With(daggerExec("generate", "-l")).
-		CombinedOutput(ctx)
-	require.NoError(t, err)
-	require.Contains(t, out, "hello-with-generators:generate-files")
-	require.Contains(t, out, "hello-with-generators:generate-other-files")
-	require.Contains(t, out, "hello-with-generators:other-generators:gen-things")
-
-	modGen = modGen.WithNewFile("dagger.json", `{
-  "name": "app",
-  "engineVersion": "v0.20.5",
-  "toolchains": [
-    {
-      "name": "hello-with-generators",
-      "source": "../hello-with-generators",
-      "ignoreGenerators": [
-        "generate-other-files",
-        "other-generators:*"
-      ]
-    }
-  ]
-}`)
-
-	out, err = modGen.
-		With(daggerExec("generate", "-l")).
-		CombinedOutput(ctx)
-	require.NoError(t, err)
-	require.Contains(t, out, "hello-with-generators:generate-files")
-	require.NotContains(t, out, "hello-with-generators:generate-other-files")
-	require.NotContains(t, out, "hello-with-generators:other-generators:gen-things")
-
-	modGen = modGen.
-		With(daggerExec("generate", "hello-with-generators:generate-*", "-y", "--progress=plain"))
-	out, err = modGen.
-		CombinedOutput(ctx)
-	require.NoError(t, err)
-	require.Contains(t, out, "hello-with-generators:generate-files")
-	require.NotContains(t, out, "hello-with-generators:generate-other-files")
-
-	exists, err := modGen.Exists(ctx, "foo")
-	require.NoError(t, err)
-	require.True(t, exists)
-	exists, err = modGen.Exists(ctx, "bar")
-	require.NoError(t, err)
-	require.False(t, exists)
-
-	modGen = modGen.
-		With(daggerExec("generate", "hello-with-generators:other-generators:*", "-y", "--progress=plain"))
-	out, err = modGen.
-		CombinedOutput(ctx)
-	require.NoError(t, err)
-	require.NotContains(t, out, "hello-with-generators:other-generators:gen-things")
-
-	exists, err = modGen.Exists(ctx, "meta-gen")
-	require.NoError(t, err)
-	require.False(t, exists)
 }
 
 func (GeneratorsSuite) TestGeneratorResultFieldsRequireRun(ctx context.Context, t *testctx.T) {

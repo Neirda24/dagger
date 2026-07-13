@@ -25,6 +25,8 @@ const (
 	rustSdkCrate     = "dagger-sdk"
 	cargoEditVersion = "0.13.0"
 	cargoChefVersion = "0.1.62"
+
+	mockCargoRegistryName = "mock"
 )
 
 // Develop the Dagger Rust SDK (experimental)
@@ -37,13 +39,18 @@ type RustSdkDev struct {
 
 func New(
 	// A directory with all the files needed to develop the SDK
-	// +defaultPath="/"
-	// +ignore=["*", "!sdk/rust/crates", "!sdk/rust/Cargo.lock", "!sdk/rust/Cargo.toml"]
-	workspace *dagger.Directory,
+	workspace *dagger.Workspace,
 	// The path of the SDK source in the workspace
 	// +default="sdk/rust"
 	sourcePath string,
+	// A docker config file with credentials to install on clients.
+	// +optional
+	clientDockerConfig *dagger.Secret,
 ) *RustSdkDev {
+	rustSrc := workspace.Directory("/", dagger.WorkspaceDirectoryOpts{
+		Exclude: []string{"*", "!sdk/rust/crates", "!sdk/rust/Cargo.lock", "!sdk/rust/Cargo.toml"},
+	})
+
 	baseContainer := dag.Container().
 		From(rustSdkImage+"@"+rustSdkImageDigest).
 		WithEnvVariable("CARGO_HOME", "/root/.cargo").
@@ -51,12 +58,14 @@ func New(
 		WithWorkdir("/src").
 		// FIXME: not all functions need a full engine build (eg. bump). Do this lazily as needed
 		With(func(c *dagger.Container) *dagger.Container {
-			return dag.DaggerEngine().InstallClient(c)
+			return dag.DaggerEngine(dagger.DaggerEngineOpts{
+				ClientDockerConfig: clientDockerConfig,
+			}).InstallClient(c)
 		})
 
 	return &RustSdkDev{
-		OriginalWorkspace: workspace,
-		Workspace:         workspace,
+		OriginalWorkspace: rustSrc,
+		Workspace:         rustSrc,
 		SourcePath:        sourcePath,
 		BaseContainer:     baseContainer,
 	}
@@ -248,6 +257,10 @@ func (t *RustSdkDev) Release(
 	sourceTag string,
 
 	cargoRegistryToken *dagger.Secret,
+
+	// Cargo registry index URL to publish to instead of crates.io.
+	// +optional
+	cargoRegistryIndex string,
 ) (err error) {
 	version := strings.TrimPrefix(sourceTag, "sdk/rust/")
 	versionFlag := strings.TrimPrefix(version, "v")
@@ -255,9 +268,21 @@ func (t *RustSdkDev) Release(
 		return fmt.Errorf("invalid version %q", version)
 	}
 
-	_, err = t.releaseContainer(versionFlag).
-		WithSecretVariable("CARGO_REGISTRY_TOKEN", cargoRegistryToken).
-		WithExec([]string{"cargo", "publish", "-p", rustSdkCrate, "-v", "--all-features"}).
+	ctr := t.releaseContainer(versionFlag)
+	args := []string{"cargo", "publish", "-p", rustSdkCrate, "-v", "--all-features"}
+	if cargoRegistryIndex != "" {
+		// Cargo alternate registries are configured through
+		// CARGO_REGISTRIES_<NAME>_* environment variables.
+		ctr = ctr.
+			WithEnvVariable("CARGO_REGISTRIES_MOCK_INDEX", cargoRegistryIndex).
+			WithSecretVariable("CARGO_REGISTRIES_MOCK_TOKEN", cargoRegistryToken)
+		args = append(args, "--registry", mockCargoRegistryName)
+	} else {
+		ctr = ctr.WithSecretVariable("CARGO_REGISTRY_TOKEN", cargoRegistryToken)
+	}
+
+	_, err = ctr.
+		WithExec(args).
 		Sync(ctx)
 
 	return err

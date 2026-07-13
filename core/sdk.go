@@ -2,15 +2,12 @@ package core
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/dagger/dagger/dagql"
-	"github.com/dagger/dagger/dagql/call"
-	"github.com/dagger/dagger/engine/buildkit"
-	telemetry "github.com/dagger/otel-go"
-	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/trace"
+	"github.com/dagger/dagger/engine/engineutil"
 )
 
 /*
@@ -85,6 +82,87 @@ type ClientGenerator interface {
 }
 
 /*
+ModuleInitializer is an interface that an SDK may implement to add
+SDK-specific workspace edits during `dagger module init`.
+*/
+type ModuleInitializer interface {
+	/*
+		Initialize a module and return the SDK-owned Changeset to merge with the
+		engine-owned workspace edits.
+
+		SDK must implement the `initModule` function with this signature shape:
+
+		```gql
+		  initModule(
+		    ws: Workspace!
+		    name: String!
+		    path: String!
+		    # SDK-specific args...
+		  ): Changeset!
+		```
+	*/
+	InitModule(
+		context.Context,
+		dagql.ObjectResult[*Workspace],
+		string,
+		string,
+		map[string]any,
+	) (dagql.ObjectResult[*Changeset], error)
+}
+
+/*
+ClientInitializer is an interface that an SDK may implement to add
+SDK-specific workspace edits during `dagger api client init`.
+*/
+type ClientInitializer interface {
+	/*
+		Initialize a generated client and return the SDK-owned Changeset to merge
+		with the engine-owned workspace edits.
+
+		SDK must implement the `initClient` function with this signature shape:
+
+		```gql
+		  initClient(
+		    ws: Workspace!
+		    path: String!
+		    module: String!
+		    # SDK-specific args...
+		  ): Changeset!
+		```
+	*/
+	InitClient(
+		context.Context,
+		dagql.ObjectResult[*Workspace],
+		string,
+		string,
+		map[string]any,
+	) (dagql.ObjectResult[*Changeset], error)
+}
+
+/*
+RuntimeTarget is an interface that an SDK may implement to delegate runtime
+execution to a different module than the SDK itself. By default the SDK
+module IS the runtime — its own installed ref is recorded as `[runtime]
+source` in the new module's dagger-module.toml. When an SDK implements this
+interface, the engine calls `targetRuntime` at `dagger module init` time
+and records the returned value instead. The split lets a thin codegen-only
+SDK target a separate, canonical runtime module.
+*/
+type RuntimeTarget interface {
+	/*
+		Return the canonical engine runtime ref that should be recorded in the
+		new module's dagger-module.toml `[runtime] source` field.
+
+		SDK must implement the `targetRuntime` field with this signature shape:
+
+		```gql
+		  targetRuntime: String!
+		```
+	*/
+	TargetRuntime(context.Context) (string, error)
+}
+
+/*
 CodeGenerator is an interface that a SDK may implements to generate code
 for a module.
 
@@ -143,13 +221,15 @@ type ModuleRuntime interface {
 
 	// Call executes a function call in this runtime.
 	// The runtime is responsible for preparing the execution environment,
-	// running the function, and returning the result.
-	// Returns the output bytes and the client ID that was used for execution.
+	// running the function, and allowing the function to report its result through
+	// the provided FunctionCall.
 	Call(
 		ctx context.Context,
-		execMD *buildkit.ExecutionMetadata,
+		execMD *engineutil.ExecutionMetadata,
 		fnCall *FunctionCall,
-	) (outputBytes []byte, clientID string, err error)
+		moduleContext dagql.ObjectResult[*Module],
+		envContext dagql.ObjectResult[*Env],
+	) error
 }
 
 /*
@@ -165,140 +245,72 @@ func (r *ContainerRuntime) AsContainer() (dagql.ObjectResult[*Container], bool) 
 
 func (r *ContainerRuntime) Call(
 	ctx context.Context,
-	execMD *buildkit.ExecutionMetadata,
+	execMD *engineutil.ExecutionMetadata,
 	fnCall *FunctionCall,
-) ([]byte, string, error) {
-	srv := dagql.CurrentDagqlServer(ctx)
+	moduleContext dagql.ObjectResult[*Module],
+	envContext dagql.ObjectResult[*Env],
+) error {
+	hideCtx := dagql.WithSkip(ctx)
 
-	// Desugar to the canonical server for core API plumbing so that
-	// entrypoint proxies cannot shadow core fields like "directory".
-	coreSrv := srv.Canonical()
-
-	var metaDir dagql.ObjectResult[*Directory]
-	err := coreSrv.Select(ctx, coreSrv.Root(), &metaDir,
-		dagql.Selector{
-			Field: "directory",
-		},
-	)
+	ctr := r.Container
+	clonedFS, err := CloneContainerDirectoryAccessor(hideCtx, ctr.Self().FS)
 	if err != nil {
-		return nil, "", fmt.Errorf("create mod metadata directory: %w", err)
+		return fmt.Errorf("clone exec rootfs: %w", err)
 	}
-
-	var ctr dagql.ObjectResult[*Container]
-	err = srv.Select(ctx, r.Container, &ctr,
-		dagql.Selector{
-			Field: "withMountedDirectory",
-			Args: []dagql.NamedInput{
-				{Name: "path", Value: dagql.String(modMetaDirPath)},
-				{Name: "source", Value: dagql.NewID[*Directory](metaDir.ID())},
-			},
-		},
-	)
+	clonedMounts, err := CloneContainerMounts(hideCtx, ctr.Self().Mounts)
 	if err != nil {
-		return nil, "", fmt.Errorf("exec function: %w", err)
+		return fmt.Errorf("clone exec mounts: %w", err)
 	}
-
-	execCtx := ctx
-	execCtx = dagql.WithSkip(execCtx) // this span shouldn't be shown (it's entirely useless)
-	err = srv.Select(execCtx, ctr, &ctr,
-		dagql.Selector{
-			Field: "withExec",
-			Args: []dagql.NamedInput{
-				{Name: "args", Value: dagql.ArrayInput[dagql.String]{}},
-				{Name: "useEntrypoint", Value: dagql.NewBoolean(true)},
-				{Name: "experimentalPrivilegedNesting", Value: dagql.NewBoolean(true)},
-				{Name: "execMD", Value: dagql.NewSerializedString(execMD)},
-			},
-		},
-	)
+	clonedMeta, err := CloneContainerMetaSnapshot(hideCtx, ctr.Self().MetaSnapshot)
 	if err != nil {
-		return nil, "", fmt.Errorf("exec function: %w", err)
+		return fmt.Errorf("clone exec meta snapshot: %w", err)
 	}
+	execCtr := &Container{
+		FS:                 clonedFS,
+		MetaSnapshot:       clonedMeta,
+		Config:             ctr.Self().Config,
+		EnabledGPUs:        slices.Clone(ctr.Self().EnabledGPUs),
+		Mounts:             clonedMounts,
+		Platform:           ctr.Self().Platform,
+		Annotations:        slices.Clone(ctr.Self().Annotations),
+		Secrets:            slices.Clone(ctr.Self().Secrets),
+		Sockets:            slices.Clone(ctr.Self().Sockets),
+		ImageRef:           ctr.Self().ImageRef,
+		Ports:              slices.Clone(ctr.Self().Ports),
+		Services:           slices.Clone(ctr.Self().Services),
+		DefaultTerminalCmd: ctr.Self().DefaultTerminalCmd,
+		SystemEnvNames:     slices.Clone(ctr.Self().SystemEnvNames),
+		DefaultArgs:        ctr.Self().DefaultArgs,
+	}
+	execCtr.Config.ExposedPorts = maps.Clone(execCtr.Config.ExposedPorts)
+	execCtr.Config.Env = slices.Clone(execCtr.Config.Env)
+	execCtr.Config.Entrypoint = slices.Clone(execCtr.Config.Entrypoint)
+	execCtr.Config.Cmd = slices.Clone(execCtr.Config.Cmd)
+	execCtr.Config.Volumes = maps.Clone(execCtr.Config.Volumes)
+	execCtr.Config.Labels = maps.Clone(execCtr.Config.Labels)
 
-	query, err := CurrentQuery(ctx)
+	err = execCtr.WithExec(hideCtx, ctr, ContainerExecOpts{
+		Args:                          []string{},
+		UseEntrypoint:                 true,
+		ExperimentalPrivilegedNesting: true,
+	}, execMD, moduleContext, fnCall)
 	if err != nil {
-		return nil, "", err
+		return fmt.Errorf("exec function: %w", err)
 	}
-	bk, err := query.Buildkit(ctx)
+
+	syncCtx := ctx
+	if envContext.Self() != nil {
+		syncCtx = EnvToContext(syncCtx, envContext)
+	}
+	err = execCtr.Sync(syncCtx)
 	if err != nil {
-		return nil, "", fmt.Errorf("get buildkit client: %w", err)
-	}
-
-	_, err = ctr.Self().Evaluate(ctx)
-	if err != nil {
-		return nil, "", r.handleCallError(ctx, fnCall, bk, err)
-	}
-
-	ctrOutputDir, err := ctr.Self().Directory(ctx, modMetaDirPath)
-	if err != nil {
-		return nil, "", fmt.Errorf("get function output directory: %w", err)
-	}
-
-	modMetaFile, err := ctrOutputDir.File(ctx, modMetaOutputPath)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to get mod meta file: %w", err)
-	}
-
-	// Read the output of the function
-	outputBytes, err := modMetaFile.Contents(ctx, nil, nil)
-	if err != nil {
-		return nil, "", fmt.Errorf("read function output file: %w", err)
-	}
-
-	// Get the client ID actually used during the function call - this might not
-	// be the same as execMD.ClientID if the function call was cached at the
-	// buildkit level
-	clientID, err := ctr.Self().usedClientID(ctx)
-	if err != nil {
-		return nil, "", fmt.Errorf("get client ID from container: %w", err)
-	}
-
-	return outputBytes, clientID, nil
-}
-
-func (r *ContainerRuntime) handleCallError(ctx context.Context, call *FunctionCall, bk *buildkit.Client, baseErr error) error {
-	id, ok, extractErr := extractError(ctx, bk, baseErr)
-	if extractErr != nil {
-		// if the module hasn't provided us with a nice error, just return the
-		// original error
-		return baseErr
-	}
-	if ok {
-		srv := dagql.CurrentDagqlServer(ctx)
-		errInst, err := id.Load(ctx, srv)
-		if err != nil {
-			return fmt.Errorf("load error instance: %w", err)
+		if fnCall.Name == "" {
+			return fmt.Errorf("call constructor: %w", err)
 		}
-		dagErr := errInst.Self().Clone()
-		originCtx := trace.SpanContextFromContext(
-			telemetry.Propagator.Extract(
-				context.Background(),
-				telemetry.AnyMapCarrier(dagErr.Extensions()),
-			),
-		)
-		if !originCtx.IsValid() {
-			// If the Error doesn't already have an origin, inject the current trace
-			// context as its origin.
-			tm := propagation.MapCarrier{}
-			telemetry.Propagator.Inject(ctx, tm)
-			for _, key := range tm.Keys() {
-				val := tm.Get(key)
-				valJSON, err := json.Marshal(val)
-				if err != nil {
-					return fmt.Errorf("marshal value: %w", err)
-				}
-				dagErr.Values = append(dagErr.Values, &ErrorValue{
-					Name:  key,
-					Value: JSON(valJSON),
-				})
-			}
-		}
-		return dagErr
+		return fmt.Errorf("call function %q: %w", fnCall.Name, err)
 	}
-	if call.Name == "" {
-		return fmt.Errorf("call constructor: %w", baseErr)
-	}
-	return fmt.Errorf("call function %q: %w", call.Name, baseErr)
+
+	return nil
 }
 
 /*
@@ -360,15 +372,15 @@ type ModuleTypes interface {
 		exposed by the module code.
 
 		This function prototype is different from the one exposed by the SDK.
-		SDK must implement the `ModuleTypes` function with the following signature:
+			SDK must implement the `ModuleTypes` function with the following signature:
 
-		```gql
-		  moduleTypes(
-		    modSource: ModuleSource!
-		    introspectionJSON: File!
-			outputFilePath: String!
-		  ): Container!
-		```
+			```gql
+			  moduleTypes(
+			    modSource: ModuleSource!
+			    introspectionJSON: File!
+				outputFilePath: String!
+			  ): Container!
+			```
 	*/
 	ModuleTypes(
 		context.Context,
@@ -379,8 +391,8 @@ type ModuleTypes interface {
 		// Current instance of the module source.
 		dagql.ObjectResult[*ModuleSource],
 
-		// Call ID to perform the call against the right module
-		*call.ID,
+		// Partially initialized module used for any CurrentModule calls the SDK makes
+		*Module,
 	) (dagql.ObjectResult[*Module], error)
 }
 
@@ -405,4 +417,24 @@ type SDK interface {
 
 	// Transform the SDK into a ClientGenerator if it implements it.
 	AsClientGenerator() (ClientGenerator, bool)
+
+	// CloneForModuleSource returns an SDK implementation copy owned by the cloned
+	// ModuleSource. SDK implementations may hold cache-backed result wrappers and
+	// rewrite them during AttachDependencyResults, so ModuleSource clones must not
+	// share mutable SDK implementation state.
+	CloneForModuleSource(*ModuleSource) SDK
+
+	// Transform the SDK into a ModuleInitializer if it implements it.
+	AsModuleInitializer() (ModuleInitializer, bool)
+
+	// Transform the SDK into a ClientInitializer if it implements it.
+	AsClientInitializer() (ClientInitializer, bool)
+
+	// Transform the SDK into a RuntimeTarget if it implements it.
+	AsRuntimeTarget() (RuntimeTarget, bool)
+
+	// AttachDependencyResults attaches any cache-backed results embedded in the
+	// SDK implementation and returns the results the owning ModuleSource must
+	// retain.
+	AttachDependencyResults(context.Context, func(dagql.AnyResult) (dagql.AnyResult, error)) ([]dagql.AnyResult, error)
 }

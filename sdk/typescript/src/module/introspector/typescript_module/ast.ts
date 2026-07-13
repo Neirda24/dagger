@@ -12,6 +12,12 @@ import { Location } from "./location.js"
 
 export const CLIENT_GEN_FILE = "client.gen.ts"
 
+// Generated client files share the `.gen.ts` suffix: `client.gen.ts` plus one
+// `<dep>.gen.ts` per dependency (dependency types are split into their own
+// files). All of them are part of the SDK surface the introspector must search
+// when resolving type references like a dependency-contributed enum.
+export const GENERATED_CLIENT_SUFFIX = ".gen.ts"
+
 export type ResolvedNodeWithSymbol<T extends keyof DeclarationsMap> = {
   type: T
   node: DeclarationsMap[T]
@@ -29,11 +35,20 @@ export class AST {
 
   private readonly sourceFiles: ts.SourceFile[]
 
+  // Resolved paths of the SDK-generated binding files (client.gen.ts and each
+  // <dep>.gen.ts). Empty when the caller didn't supply them, in which case
+  // isGeneratedClientFile falls back to the `.gen.ts` suffix.
+  private readonly generatedClientFiles: Set<string>
+
   constructor(
     public readonly files: string[],
     private readonly userModule: Module[],
+    generatedClientFiles: string[] = [],
   ) {
     this.files = files.map((f) => path.resolve(f))
+    this.generatedClientFiles = new Set(
+      generatedClientFiles.map((f) => path.resolve(f)),
+    )
     const program = ts.createProgram(files, {
       experimentalDecorators: true,
       moduleResolution: ts.ModuleResolutionKind.Node10,
@@ -43,6 +58,16 @@ export class AST {
     this.sourceFiles = program
       .getSourceFiles()
       .filter((file) => !file.isDeclarationFile)
+  }
+
+  // isGeneratedClientFile reports whether a file is one of the SDK-generated
+  // bindings (client.gen.ts or a <dep>.gen.ts). It checks the explicit set when
+  // available, falling back to the `.gen.ts` suffix otherwise.
+  public isGeneratedClientFile(fileName: string): boolean {
+    if (this.generatedClientFiles.size > 0) {
+      return this.generatedClientFiles.has(path.resolve(fileName))
+    }
+    return fileName.endsWith(GENERATED_CLIENT_SUFFIX)
   }
 
   public findResolvedNodeByName<T extends keyof DeclarationsMap>(
@@ -60,9 +85,11 @@ export class AST {
       ts.forEachChild(sourceFile, (node) => {
         if (result !== undefined) return
 
-        // Skip if it's not from the client gen nor the user module
+        // Skip if it's not from a generated client file nor the user module.
+        // Generated files include client.gen.ts and every per-dependency
+        // <dep>.gen.ts (split out from the core client).
         if (
-          !sourceFile.fileName.endsWith(CLIENT_GEN_FILE) &&
+          !this.isGeneratedClientFile(sourceFile.fileName) &&
           !this.files.includes(path.resolve(sourceFile.fileName))
         ) {
           return
@@ -105,9 +132,11 @@ export class AST {
 
     for (const sourceFile of this.sourceFiles) {
       ts.forEachChild(sourceFile, (node) => {
-        // Skip if it's not from the client gen nor the user module
+        // Skip if it's not from a generated client file nor the user module.
+        // Generated files include client.gen.ts and every per-dependency
+        // <dep>.gen.ts (split out from the core client).
         if (
-          !sourceFile.fileName.endsWith(CLIENT_GEN_FILE) &&
+          !this.isGeneratedClientFile(sourceFile.fileName) &&
           !this.files.includes(path.resolve(sourceFile.fileName))
         ) {
           return
@@ -312,8 +341,50 @@ export class AST {
       case "string":
         return argument.getText() as T
       case "object":
-        return eval(`(${argument.getText()})`)
+        return this.resolveDecoratorArgumentValue(argument) as T
     }
+  }
+
+  /**
+   * Resolve the value of a decorator argument expression.
+   *
+   * Decorator arguments may reference module-level constants, e.g.
+   * `@argument({ ignore: IGNORE })` or `@func({ alias: NAME })`. We therefore
+   * cannot simply `eval` the raw text: the referenced symbols are not in scope
+   * and the evaluation would throw. Instead we walk the expression and resolve
+   * each value through {@link resolveParameterDefaultValue}, which already knows
+   * how to follow identifiers, imports and enum members back to their literal
+   * values.
+   */
+  private resolveDecoratorArgumentValue(expression: ts.Expression): any {
+    if (ts.isObjectLiteralExpression(expression)) {
+      const result: Record<string, any> = {}
+
+      for (const property of expression.properties) {
+        if (ts.isPropertyAssignment(property)) {
+          result[this.getPropertyName(property.name)] =
+            this.resolveParameterDefaultValue(property.initializer)
+        } else if (ts.isShorthandPropertyAssignment(property)) {
+          // `{ alias }` shorthand, resolve the value from the identifier.
+          result[property.name.getText()] = this.resolveParameterDefaultValue(
+            property.name,
+          )
+        }
+      }
+
+      return result
+    }
+
+    // Non-object arguments, e.g. the string alias form `@func("alias")`.
+    return this.resolveParameterDefaultValue(expression)
+  }
+
+  private getPropertyName(name: ts.PropertyName): string {
+    if (ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
+      return name.text
+    }
+
+    return name.getText()
   }
 
   public unwrapTypeStringFromPromise(type: string): string {
@@ -353,15 +424,32 @@ export class AST {
   }
 
   public typeToStringType(type: ts.Type): string {
-    const stringType = this.checker.typeToString(type)
+    const stringType = this.checker.typeToString(this.unwrapNullable(type))
 
     return this.stringTypeToUnwrappedType(stringType)
+  }
+
+  /**
+   * Strip `undefined` / `null` from a union type so the resolver sees the underlying
+   * type directly. Non-union types are returned as-is — in particular `void` must
+   * not be passed through `getNonNullableType`, which would collapse it to `never`.
+   */
+  private unwrapNullable(type: ts.Type): ts.Type {
+    if (type.flags & ts.TypeFlags.Union) {
+      return this.checker.getNonNullableType(type)
+    }
+    return type
   }
 
   public tsTypeToTypeDef(
     node: ts.Node,
     type: ts.Type,
   ): TypeDef<TypeDefKind> | undefined {
+    // Optional parameters/properties (e.g. `foo?: string`) are typed as `T | undefined`
+    // by the type checker. Strip the nullable parts so the downstream flag checks see
+    // the underlying `T` directly.
+    type = this.unwrapNullable(type)
+
     if (type.flags & ts.TypeFlags.String)
       return { kind: TypeDefKind.StringKind }
     if (type.flags & ts.TypeFlags.Number) {

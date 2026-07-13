@@ -1,5 +1,8 @@
 package core
 
+// These tests cover Unix sockets passed between the host and containers. They
+// verify socket mounts and ownership metadata.
+
 import (
 	"context"
 	_ "embed"
@@ -109,6 +112,11 @@ func (ContainerSuite) TestWithUnixSocketOwner(ctx context.Context, t *testctx.T)
 		testOwnership(t, c, func(ctr *dagger.Container, name string, owner string) *dagger.Container {
 			return ctr.WithUnixSocket(name, hostSock, dagger.ContainerWithUnixSocketOpts{
 				Owner: owner,
+			})
+		})
+		testInheritOwnership(ctx, t, c, func(ctr *dagger.Container, name string) *dagger.Container {
+			return ctr.WithUnixSocket(name, hostSock, dagger.ContainerWithUnixSocketOpts{
+				InheritOwner: true,
 			})
 		})
 	})

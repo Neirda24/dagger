@@ -2,6 +2,12 @@
 Export a type for each type or input existing in the GraphQL schema.
  */ -}}
 {{ define "types" }}
+	{{- if LegacyTypeScriptSDKCompat }}
+		{{- range (LegacyIDableTypes .Types) }}
+export type {{ .Name | LegacyIDName }} = string & { __{{ .Name | LegacyIDName }}: never }
+{{ "" }}
+		{{- end }}
+	{{- end }}
 	{{- range .Types }}
 		{{- template "type" . }}
 	{{- end }}
@@ -85,7 +91,7 @@ export enum {{ $enumName }} { {{- with .Directives.SourceMap }} // {{ .Module }}
  * Utility function to convert a {{ .Name }} value to its name so
  * it can be uses as argument to call a exposed function.
  */
-function {{ .Name | PascalCase }}ValueToName(value: {{ .Name }}): string {
+export function {{ .Name | PascalCase }}ValueToName(value: {{ .Name }}): string {
   switch (value) {
 	{{- range $fields := .EnumValues | SortEnumFields | GroupEnumByValue -}}
 		{{- $field := index $fields 0 }}
@@ -102,7 +108,7 @@ function {{ .Name | PascalCase }}ValueToName(value: {{ .Name }}): string {
  * Utility function to convert a {{ $enumName }} name to its value so
  * it can be properly used inside the module runtime.
  */
-function {{ $enumName | PascalCase }}NameToValue(name: string): {{ $enumName }} {
+export function {{ $enumName | PascalCase }}NameToValue(name: string): {{ $enumName }} {
   switch (name) {
 	{{- range $fields := .EnumValues | SortEnumFields | GroupEnumByValue -}}
 		{{- $field := index $fields 0 }}
@@ -170,12 +176,8 @@ export type {{ $.Name | FormatName }} = {
    */
 		{{- end }}
 
-		{{- /* Write type, if it's an id it's an output, otherwise it's an input. */ -}}
-		{{- if eq $field.Name "id" }}
-  {{ $field.Name }}{{ $opt }}: {{ $field.TypeRef | FormatOutputType }} {{- with .Directives.SourceMap }} // {{ .Module }} ({{ .Filelink | ModuleRelPath }}) {{- end }}
-		{{- else }}
-  {{ $field.Name }}{{ $opt }}: {{ $field.TypeRef | FormatInputType }} {{- with .Directives.SourceMap }} // {{ .Module }} ({{ .Filelink | ModuleRelPath }}) {{- end }}
-		{{- end }}
+		{{- /* Write type. */}}
+  {{ $field.Name }}{{ $opt }}: {{ $field | FormatInputType }} {{- with .Directives.SourceMap }} // {{ .Module }} ({{ .Filelink | ModuleRelPath }}) {{- end }}
 
 	{{- end }}
 {{- end }}

@@ -56,6 +56,11 @@ func NewGraphEvaluator(environ []string, systemLookup func(string) string, noUns
 
 // parseEntry parses a line into a parsedEntry without expanding variables
 func (g *GraphEvaluator) parseEntry(line string) (*parsedEntry, error) {
+	// Strip an optional leading `export` keyword. This is a widely supported
+	// dotenv convention (direnv, `set -a; . ./.env`, shell `source`, and most
+	// .env loaders), so we treat `export KEY=value` the same as `KEY=value`.
+	line = StripExportPrefix(line)
+
 	// Try fast path first for simple assignments
 	if idx := strings.Index(line, "="); idx != -1 {
 		key := line[:idx]
@@ -226,7 +231,7 @@ func (g *GraphEvaluator) All() (map[string]string, error) {
 	return result, nil
 }
 
-// Evaluate an array of key=value strings in the dotenv syntax,
+// All evaluates an array of key=value strings in the dotenv syntax,
 // and return a map of evaluated variables
 func All(environ []string, systemLookup func(string) string, noUnset bool) (map[string]string, error) {
 	g, err := NewGraphEvaluator(environ, systemLookup, noUnset)
@@ -234,6 +239,49 @@ func All(environ []string, systemLookup func(string) string, noUnset bool) (map[
 		return nil, err
 	}
 	return g.All()
+}
+
+// AllWithContext evaluates only the variables defined in own, while making the
+// variables in context available for ${...} expansion (they are not returned).
+// context entries are only expanded if referenced by an own value, so an
+// unrelated unbound context entry never triggers an error. When a name is
+// defined in both, the own value wins.
+func AllWithContext(own, context []string, systemLookup func(string) string, noUnset bool) (map[string]string, error) {
+	g, err := NewGraphEvaluator(mergeEnviron(context, own), systemLookup, noUnset)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]string)
+	for name := range AllRaw(own) {
+		value, _, err := g.Lookup(name)
+		if err != nil {
+			return nil, err
+		}
+		result[name] = value
+	}
+	return result, nil
+}
+
+// LookupWithContext evaluates a single own variable, using context for ${...}
+// expansion. Returns found=false if name is not defined in own.
+func LookupWithContext(own, context []string, name string, systemLookup func(string) string) (string, bool, error) {
+	if _, ok := LookupRaw(own, name); !ok {
+		return "", false, nil
+	}
+	g, err := NewGraphEvaluator(mergeEnviron(context, own), systemLookup, true)
+	if err != nil {
+		return "", false, err
+	}
+	return g.Lookup(name)
+}
+
+// mergeEnviron concatenates environ slices; later entries override earlier ones
+// (as the graph evaluator keys raw entries by name), so own wins over context.
+func mergeEnviron(context, own []string) []string {
+	merged := make([]string, 0, len(context)+len(own))
+	merged = append(merged, context...)
+	merged = append(merged, own...)
+	return merged
 }
 
 // Evaluate an array of key=value strings in the dotenv syntax,
@@ -245,6 +293,7 @@ func AllRaw(environ []string) map[string]string {
 		if kv == "" {
 			continue // skip empty lines
 		}
+		kv = StripExportPrefix(kv)
 		name, value, _ := strings.Cut(kv, "=")
 		vars[name] = value
 	}
@@ -275,6 +324,7 @@ func Exists(environ []string, name string) bool {
 		if kv == "" {
 			continue // skip empty lines
 		}
+		kv = StripExportPrefix(kv)
 		k, _, _ := strings.Cut(kv, "=")
 		if k == name {
 			return true
@@ -285,6 +335,18 @@ func Exists(environ []string, name string) bool {
 
 // simpleKeyRegexp checks if a key is a valid environment variable name
 var simpleKeyRegexp = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// exportPrefixRegexp matches a leading `export` keyword (with trailing
+// whitespace), as commonly used in .env files.
+var exportPrefixRegexp = regexp.MustCompile(`^export\s+`)
+
+// StripExportPrefix removes an optional leading `export` keyword from a dotenv
+// line. This is a widely supported convention (direnv, `set -a; . ./.env`,
+// shell `source`, and most .env loaders), so `export KEY=value` is treated the
+// same as `KEY=value`.
+func StripExportPrefix(line string) string {
+	return exportPrefixRegexp.ReplaceAllString(line, "")
+}
 
 // containsShellFeatures checks if a value contains shell features that require parsing
 func containsShellFeatures(value string) bool {

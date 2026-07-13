@@ -180,6 +180,53 @@ func TestAllExpansion(t *testing.T) {
 			},
 		},
 		{
+			name: "export prefix",
+			environ: []string{
+				"export FOO=bar",
+			},
+			want: map[string]string{
+				"FOO": "bar",
+			},
+		},
+		{
+			name: "export prefix with quoted value",
+			environ: []string{
+				`export FOO="bar baz"`,
+			},
+			want: map[string]string{
+				"FOO": "bar baz",
+			},
+		},
+		{
+			name: "export prefix with expansion",
+			environ: []string{
+				"export FOO=bar",
+				"export BAZ=$FOO-baz",
+			},
+			want: map[string]string{
+				"FOO": "bar",
+				"BAZ": "bar-baz",
+			},
+		},
+		{
+			name: "export prefix with extra whitespace",
+			environ: []string{
+				"export   FOO=bar",
+			},
+			want: map[string]string{
+				"FOO": "bar",
+			},
+		},
+		{
+			name: "key named export-like is not stripped",
+			environ: []string{
+				"exportable=yes",
+			},
+			want: map[string]string{
+				"exportable": "yes",
+			},
+		},
+		{
 			name: "empty line",
 			environ: []string{
 				"",
@@ -297,6 +344,29 @@ func TestLookup(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok, "Lookup should find BAZ")
 	require.Equal(t, "bar-baz", val)
+}
+
+func TestAllWithContext(t *testing.T) {
+	own := []string{
+		`SOURCE=${ROOT_DIR}/pepe`,
+	}
+	context := []string{
+		`ROOT_DIR=../..`,
+		`HELM_SOURCE=${UNDEFINED_THING}`,
+	}
+
+	all, err := AllWithContext(own, context, nil, true)
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{"SOURCE": "../../pepe"}, all)
+
+	val, ok, err := LookupWithContext(own, context, "SOURCE", nil)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, "../../pepe", val)
+
+	_, ok, err = LookupWithContext(own, context, "ROOT_DIR", nil)
+	require.NoError(t, err)
+	require.False(t, ok, "context-only variable should not be found")
 }
 
 func TestNoSystemLookupWhenLiteral(t *testing.T) {

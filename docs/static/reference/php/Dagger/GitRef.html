@@ -86,7 +86,7 @@
 
     
     <p>        class
-    <strong>GitRef</strong>        extends <a href="../Dagger/Client/AbstractObject.html"><abbr title="Dagger\Client\AbstractObject">AbstractObject</abbr></a>        implements        <a href="../Dagger/Client/IdAble.html"><abbr title="Dagger\Client\IdAble">IdAble</abbr></a>
+    <strong>GitRef</strong>        extends <a href="../Dagger/Client/AbstractObject.html"><abbr title="Dagger\Client\AbstractObject">AbstractObject</abbr></a>        implements        <a href="../Dagger/Client/IdAble.html"><abbr title="Dagger\Client\IdAble">IdAble</abbr></a>, <a href="../Dagger/Node.html"><abbr title="Dagger\Node">Node</abbr></a>
 </p>
 
         
@@ -143,6 +143,16 @@
             </div>
                     <div class="row">
                 <div class="col-md-2 type">
+                    <a href="../Dagger/Workspace.html"><abbr title="Dagger\Workspace">Workspace</abbr></a>
+                </div>
+                <div class="col-md-8">
+                    <a href="#method_asWorkspace">asWorkspace</a>(string|null $cwd = &#039;/&#039;)
+        
+                                            <p><p>Creates a synthetic workspace from this git ref.</p></p>                </div>
+                <div class="col-md-2"></div>
+            </div>
+                    <div class="row">
+                <div class="col-md-2 type">
                     string
                 </div>
                 <div class="col-md-8">
@@ -156,14 +166,14 @@
                     <a href="../Dagger/GitRef.html"><abbr title="Dagger\GitRef">GitRef</abbr></a>
                 </div>
                 <div class="col-md-8">
-                    <a href="#method_commonAncestor">commonAncestor</a>(<abbr title="Dagger\GitRefId|Dagger\GitRef">GitRef</abbr> $other)
+                    <a href="#method_commonAncestor">commonAncestor</a>(<a href="../Dagger/GitRef.html"><abbr title="Dagger\GitRef">GitRef</abbr></a> $other)
         
                                             <p><p>Find the best common ancestor between this ref and another ref.</p></p>                </div>
                 <div class="col-md-2"></div>
             </div>
                     <div class="row">
                 <div class="col-md-2 type">
-                    <a href="../Dagger/Client/AbstractId.html"><abbr title="Dagger\Client\AbstractId">AbstractId</abbr></a>
+                    <a href="../Dagger/Id.html"><abbr title="Dagger\Id">Id</abbr></a>
                 </div>
                 <div class="col-md-8">
                     <a href="#method_id">id</a>()
@@ -287,8 +297,50 @@
 
             </div>
                     <div class="method-item">
-                    <h3 id="method_commit">
+                    <h3 id="method_asWorkspace">
         <div class="location">at line 19</div>
+        <code>                    <a href="../Dagger/Workspace.html"><abbr title="Dagger\Workspace">Workspace</abbr></a>
+    <strong>asWorkspace</strong>(string|null $cwd = &#039;/&#039;)
+        </code>
+    </h3>
+    <div class="details">    
+    
+            
+
+        <div class="method-description">
+                            <p><p>Creates a synthetic workspace from this git ref.</p></p>                        
+        </div>
+        <div class="tags">
+                            <h4>Parameters</h4>
+
+                    <table class="table table-condensed">
+                    <tr>
+                <td>string|null</td>
+                <td>$cwd</td>
+                <td></td>
+            </tr>
+            </table>
+
+            
+                            <h4>Return Value</h4>
+
+                    <table class="table table-condensed">
+        <tr>
+            <td><a href="../Dagger/Workspace.html"><abbr title="Dagger\Workspace">Workspace</abbr></a></td>
+            <td></td>
+        </tr>
+    </table>
+
+            
+            
+            
+                    </div>
+    </div>
+
+            </div>
+                    <div class="method-item">
+                    <h3 id="method_commit">
+        <div class="location">at line 31</div>
         <code>                    string
     <strong>commit</strong>()
         </code>
@@ -320,9 +372,9 @@
             </div>
                     <div class="method-item">
                     <h3 id="method_commonAncestor">
-        <div class="location">at line 28</div>
+        <div class="location">at line 40</div>
         <code>                    <a href="../Dagger/GitRef.html"><abbr title="Dagger\GitRef">GitRef</abbr></a>
-    <strong>commonAncestor</strong>(<abbr title="Dagger\GitRefId|Dagger\GitRef">GitRef</abbr> $other)
+    <strong>commonAncestor</strong>(<a href="../Dagger/GitRef.html"><abbr title="Dagger\GitRef">GitRef</abbr></a> $other)
         </code>
     </h3>
     <div class="details">    
@@ -337,7 +389,7 @@
 
                     <table class="table table-condensed">
                     <tr>
-                <td><abbr title="Dagger\GitRefId|Dagger\GitRef">GitRef</abbr></td>
+                <td><a href="../Dagger/GitRef.html"><abbr title="Dagger\GitRef">GitRef</abbr></a></td>
                 <td>$other</td>
                 <td></td>
             </tr>
@@ -362,8 +414,8 @@
             </div>
                     <div class="method-item">
                     <h3 id="method_id">
-        <div class="location">at line 38</div>
-        <code>                    <a href="../Dagger/Client/AbstractId.html"><abbr title="Dagger\Client\AbstractId">AbstractId</abbr></a>
+        <div class="location">at line 50</div>
+        <code>                    <a href="../Dagger/Id.html"><abbr title="Dagger\Id">Id</abbr></a>
     <strong>id</strong>()
         </code>
     </h3>
@@ -380,7 +432,7 @@
 
                     <table class="table table-condensed">
         <tr>
-            <td><a href="../Dagger/Client/AbstractId.html"><abbr title="Dagger\Client\AbstractId">AbstractId</abbr></a></td>
+            <td><a href="../Dagger/Id.html"><abbr title="Dagger\Id">Id</abbr></a></td>
             <td></td>
         </tr>
     </table>
@@ -394,7 +446,7 @@
             </div>
                     <div class="method-item">
                     <h3 id="method_ref">
-        <div class="location">at line 47</div>
+        <div class="location">at line 59</div>
         <code>                    string
     <strong>ref</strong>()
         </code>
@@ -426,7 +478,7 @@
             </div>
                     <div class="method-item">
                     <h3 id="method_tree">
-        <div class="location">at line 56</div>
+        <div class="location">at line 68</div>
         <code>                    <a href="../Dagger/Directory.html"><abbr title="Dagger\Directory">Directory</abbr></a>
     <strong>tree</strong>(bool|null $discardGitDir = false, int|null $depth = 1, bool|null $includeTags = false)
         </code>

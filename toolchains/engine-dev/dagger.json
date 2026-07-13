@@ -1,6 +1,6 @@
 {
   "name": "engine-dev",
-  "engineVersion": "v0.20.3",
+  "engineVersion": "v0.21.7",
   "sdk": {
     "source": "go"
   },
@@ -29,10 +29,6 @@
       "source": "../go"
     },
     {
-      "name": "version",
-      "source": "../../version"
-    },
-    {
       "name": "wolfi",
       "source": "../../modules/wolfi"
     },
@@ -40,5 +36,8 @@
       "name": "notify",
       "source": "notify"
     }
-  ]
+  ],
+  "codegen": {
+    "automaticGitignore": false
+  }
 }

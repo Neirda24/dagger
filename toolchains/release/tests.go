@@ -11,15 +11,18 @@ import (
 )
 
 // Create a fake release a run checks to catch potential breaking changes.
-func (r *Release) TestLocalRelease(ctx context.Context) (*ReleaseTest, error) {
-	v, err := dag.Version().Version(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get current engine version: %w", err)
+func (r *Release) TestLocalRelease(
+	ctx context.Context,
+	// Current engine version. The test runs the next patch (vX.Y.Z+1) on top.
+	version string,
+) (*ReleaseTest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	return &ReleaseTest{
 		Container: dag.EngineDev().Playground(
-			dagger.EngineDevPlaygroundOpts{Version: bumpVersionByPatch(v)},
+			dagger.EngineDevPlaygroundOpts{Version: bumpVersionByPatch(version)},
 		),
 	}, nil
 }
@@ -28,19 +31,34 @@ type ReleaseTest struct {
 	Container *dagger.Container
 }
 
-// Test creating a new module and executing basic commands
+// Test scaffolding a new module via the Go SDK and executing basic commands.
+//
+// This installs the Go SDK, uses `dagger module init` with the legacy template
+// (the classic ContainerEcho/GrepDir example) to scaffold a module, then calls
+// the generated module. Workspace discovery resolves through a .git boundary,
+// so the working directory is initialized as a repo first.
 // +check
 func (r *ReleaseTest) NewModule(ctx context.Context) error {
-	ctr := r.Container.WithWorkdir("/work/module")
+	ctr := r.Container.WithWorkdir("/work")
 
-	ctr, err := ctr.WithExec([]string{"dagger", "init", "--name=my-module", "--sdk=go", "--source=."}).Sync(ctx)
+	ctr, err := ctr.WithExec([]string{"git", "init"}).Sync(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to initialize a new module: %w", err)
+		return fmt.Errorf("failed to initialize workspace git repo: %w", err)
 	}
 
-	_, err = ctr.WithExec([]string{"dagger", "call", "container-echo", "--string-arg", "hello-world", "sync"}).Sync(ctx)
+	ctr, err = ctr.WithExec([]string{"dagger", "sdk", "install", "go"}).Sync(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to run dagger call on existing module: %w", err)
+		return fmt.Errorf("failed to install go-sdk into workspace: %w", err)
+	}
+
+	ctr, err = ctr.WithExec([]string{"dagger", "-y", "module", "init", "go", "my-module", "--template=legacy"}).Sync(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to scaffold a new module: %w", err)
+	}
+
+	_, err = ctr.WithExec([]string{"dagger", "-m", ".dagger/modules/my-module", "call", "container-echo", "--string-arg", "hello-world", "sync"}).Sync(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to run dagger call on scaffolded module: %w", err)
 	}
 
 	return nil
@@ -58,12 +76,7 @@ func (r *ReleaseTest) ExistingModule(
 		WithDirectory("/work/module", testdata).
 		WithWorkdir("/work/module")
 
-	_, err := ctr.WithExec([]string{"dagger", "develop"}).Sync(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to run dagger develop on existing module: %w", err)
-	}
-
-	_, err = ctr.WithExec([]string{"dagger", "call", "container-echo", "--string-arg", "hello-world", "sync"}).Sync(ctx)
+	_, err := ctr.WithExec([]string{"dagger", "call", "-m", ".", "container-echo", "--string-arg", "hello-world", "sync"}).Sync(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to run dagger call on existing module: %w", err)
 	}

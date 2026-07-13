@@ -21,11 +21,10 @@ import (
 )
 
 const (
-	daggerGenFilename   = "dagger.gen.go"
-	contextTypename     = "context.Context"
-	constructorFuncName = "New"
-	// this is aliased as `type DaggerObject = querybuilder.GraphQLMarshaller`
-	daggerObjectIfaceName = "GraphQLMarshaller"
+	daggerGenFilename     = "dagger.gen.go"
+	contextTypename       = "context.Context"
+	constructorFuncName   = "New"
+	daggerObjectIfaceName = "DaggerObject"
 )
 
 func (funcs goTemplateFuncs) isModuleCode() bool {
@@ -134,12 +133,16 @@ Go function.
 func (funcs goTemplateFuncs) moduleMainSrc() (string, error) {
 	objFunctionCases := map[string][]Code{}
 
+	createMod := Qual("dag", "Module").Call()
 	implementationCode := Empty()
 
 	err := funcs.visitTypes(
 		true,
 		&visitorFuncs{
 			RootVisitor: func(pkgDoc string) error {
+				if pkgDoc != "" {
+					createMod = dotLine(createMod, "WithDescription").Call(Lit(pkgDoc))
+				}
 				return nil
 			},
 			StructVisitor: func(ps *parseState, named *types.Named, obj *types.TypeName, objTypeSpec *parsedObjectType, strct *types.Struct) error {
@@ -155,6 +158,12 @@ func (funcs goTemplateFuncs) moduleMainSrc() (string, error) {
 				}
 				implementationCode.Add(implCode).Line()
 
+				objTypeDefCode, err := objTypeSpec.TypeDefCode()
+				if err != nil {
+					return fmt.Errorf("failed to generate type def code for %s: %w", obj.Name(), err)
+				}
+				createMod = dotLine(createMod, "WithObject").Call(Add(Line(), objTypeDefCode))
+
 				return nil
 			},
 			IfaceVisitor: func(ps *parseState, named *types.Named, obj *types.TypeName, ifaceTypeSpec *parsedIfaceType, iface *types.Interface) error {
@@ -165,6 +174,12 @@ func (funcs goTemplateFuncs) moduleMainSrc() (string, error) {
 				}
 				implementationCode.Add(implCode).Line()
 
+				ifaceTypeDefCode, err := ifaceTypeSpec.TypeDefCode()
+				if err != nil {
+					return fmt.Errorf("failed to generate type def code for %s: %w", obj.Name(), err)
+				}
+				createMod = dotLine(createMod, "WithInterface").Call(Add(Line(), ifaceTypeDefCode))
+
 				return nil
 			},
 			EnumVisitor: func(ps *parseState, named *types.Named, obj *types.TypeName, enumTypeSpec *parsedEnumType, enum *types.Basic) error {
@@ -174,6 +189,12 @@ func (funcs goTemplateFuncs) moduleMainSrc() (string, error) {
 					return fmt.Errorf("failed to generate enum code for %s: %w", obj.Name(), err)
 				}
 				implementationCode.Add(implCode).Line()
+
+				enumTypeDefCode, err := enumTypeSpec.TypeDefCode()
+				if err != nil {
+					return fmt.Errorf("failed to generate type def code for %s: %w", obj.Name(), err)
+				}
+				createMod = dotLine(createMod, "WithEnum").Call(Add(Line(), enumTypeDefCode))
 
 				return nil
 			},
@@ -190,7 +211,7 @@ func (funcs goTemplateFuncs) moduleMainSrc() (string, error) {
 	out = append(out,
 		fmt.Sprintf("%#v", implementationCode),
 		mainSrc(funcs.CheckVersionCompatibility),
-		invokeSrc(objFunctionCases),
+		invokeSrc(objFunctionCases, createMod),
 	)
 	return strings.Join(out, "\n"), nil
 }
@@ -331,8 +352,12 @@ func findSingleGQLError(rerr error) *gqlerror.Error {
 ` + dispatch
 }
 
+func dotLine(a *Statement, id string) *Statement {
+	return a.Op(".").Line().Id(id)
+}
+
 // the source code of the invoke func, which is the mostly dynamically generated code that actually calls the user's functions
-func invokeSrc(objFunctionCases map[string][]Code) string {
+func invokeSrc(objFunctionCases map[string][]Code, createMod Code) string {
 	// each `case` statement for every object name, which makes up the body of the invoke func
 	objNames := []string{}
 	for objName := range objFunctionCases {
@@ -344,6 +369,10 @@ func invokeSrc(objFunctionCases map[string][]Code) string {
 		functionCases := objFunctionCases[objName]
 		objCases = append(objCases, Case(Lit(objName)).Block(Switch(Id(fnNameVar)).Block(functionCases...)))
 	}
+	// when the object name is empty, return the module definition
+	objCases = append(objCases, Case(Lit("")).Block(
+		Return(createMod, Nil()),
+	))
 	// default case (return error)
 	objCases = append(objCases, Default().Block(
 		Return(Nil(), Qual("fmt", "Errorf").Call(Lit("unknown object %s"), Id(parentNameVar))),
@@ -404,6 +433,9 @@ func (ps *parseState) renderNameOrStruct(t types.Type) string {
 	}
 	if named, ok := t.(*types.Named); ok {
 		if _, ok := named.Underlying().(*types.Interface); ok {
+			if ps.isDaggerGenerated(named.Obj()) {
+				return "*" + named.Obj().Pkg().Name() + "." + named.Obj().Name() + "Client"
+			}
 			return "*" + formatIfaceImplName(named.Obj().Name())
 		}
 
@@ -468,14 +500,14 @@ func (ps *parseState) checkConstructor(obj types.Object) bool {
 }
 
 func (ps *parseState) checkDaggerObjectIface(obj types.Object) (bool, error) {
-	objType := dealias(obj.Type())
-
-	named, isNamed := objType.(*types.Named)
-	if !isNamed {
+	if obj.Name() != daggerObjectIfaceName {
 		return false, nil
 	}
-	if named.Obj().Name() != daggerObjectIfaceName {
-		return false, nil
+
+	objType := dealias(obj.Type())
+	named, isNamed := objType.(*types.Named)
+	if !isNamed {
+		return false, fmt.Errorf("expected %s to be a named interface, but got %T (%s)", daggerObjectIfaceName, obj.Type(), obj.Type().String())
 	}
 	iface, isIface := named.Underlying().(*types.Interface)
 	if !isIface {
@@ -707,10 +739,11 @@ func (ps *parseState) fillObjectFunctionCase(
 type parseState struct {
 	schema *introspection.Schema
 
-	pkg        *packages.Package
-	fset       *token.FileSet
-	moduleName string
-	objs       []types.Object
+	pkg               *packages.Package
+	fset              *token.FileSet
+	moduleName        string
+	legacyGoSDKCompat bool
+	objs              []types.Object
 
 	methods map[string][]method
 
@@ -1050,6 +1083,16 @@ func (ps *parseState) functionCallArgCode(t types.Type, access *Statement) (type
 		return nil, nil, false, nil
 	case *types.Named:
 		if _, ok := t.Underlying().(*types.Interface); ok {
+			if ps.isDaggerGenerated(t.Obj()) {
+				pkgName := t.Obj().Pkg().Name()
+				clientType := Op("*").Id(pkgName).Dot(t.Obj().Name() + "Client")
+				ifaceType := Id(pkgName).Dot(t.Obj().Name())
+				return t, Func().Params(Id("v").Add(clientType)).Params(ifaceType).Block(
+					If(Id("v").Op("==").Nil()).Block(Return(Nil())),
+					Return(Id("v")),
+				).Call(access), true, nil
+			}
+
 			/*
 				Need to convert concrete impl struct interface. e.g.:
 					access.toIface
@@ -1072,6 +1115,18 @@ func (ps *parseState) functionCallArgCode(t types.Type, access *Statement) (type
 			Need to convert slice of concrete impl structs to slice of interface e.g.:
 				convertSlice(access, (*ifaceImpl).toIface)
 		*/
+		if ps.isDaggerGenerated(elemNamed.Obj()) {
+			pkgName := elemNamed.Obj().Pkg().Name()
+			clientType := Op("*").Id(pkgName).Dot(elemNamed.Obj().Name() + "Client")
+			ifaceType := Id(pkgName).Dot(elemNamed.Obj().Name())
+			return t, Id("convertSlice").Call(
+				access,
+				Func().Params(Id("v").Add(clientType)).Params(ifaceType).Block(
+					If(Id("v").Op("==").Nil()).Block(Return(Nil())),
+					Return(Id("v")),
+				),
+			), true, nil
+		}
 		return t, Id("convertSlice").Call(
 			access,
 			Parens(Op("*").Id(formatIfaceImplName(elemNamed.Obj().Name()))).Dot("toIface"),

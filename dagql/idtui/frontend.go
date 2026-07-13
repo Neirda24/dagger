@@ -2,6 +2,7 @@ package idtui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -115,9 +116,95 @@ type Frontend interface {
 	prompt.PromptHandler
 }
 
+// TraceFrontend is the optional interface 'dagger trace' drives for
+// incremental loading and report zooming: snapshot import, lazy span/log
+// providers, surfaced-failure prefetch, and name-based zoom targets. Only the
+// pretty frontend implements it; other frontends receive a plain OTLP
+// span/log stream instead.
+type TraceFrontend interface {
+	// SetTraceID lets the frontend point surfaced failure logs at
+	// 'dagger cloud logs <trace> <span>' for the full output.
+	SetTraceID(string)
+	// ImportSnapshots folds Cloud span snapshots (carrying ChildCount and
+	// Partial, which OTLP drops) into the frontend's DB.
+	ImportSnapshots([]dagui.SpanSnapshot)
+	// SetLogProvider/SetSpanProvider register the lazy fetchers fired when a
+	// span is expanded or a failure is surfaced.
+	SetLogProvider(func(id dagui.SpanID, descendants bool))
+	SetSpanProvider(func(id dagui.SpanID))
+	// SurfacedFailedCheckSpans lists the failed checks' spans (plus their
+	// error origins and links) whose subtrees the report needs prefetched.
+	SurfacedFailedCheckSpans() []dagui.SpanID
+	// RequestSurfacedLogs makes the frontend request logs for the failures it
+	// surfaces, so a single final report render includes their detail.
+	RequestSurfacedLogs()
+	// SetFetchWaiter lets the console block a request on in-flight fetches.
+	SetFetchWaiter(func())
+	// SetCIContext records the trace's source commit so the report can
+	// suggest commit-scoped re-run commands.
+	SetCIContext(commit string, isNativeCI bool)
+	// ResolveSpanTarget resolves a --check/--test name against the loaded
+	// view, matching the selection rules the report rendered with.
+	ResolveSpanTarget(check, test string) (dagui.SpanID, bool)
+	// ZoomToSpan scopes the view to a span; RequestZoomLogs fetches the
+	// logs the zoomed report will render.
+	ZoomToSpan(dagui.SpanID)
+	RequestZoomLogs(id dagui.SpanID, descendants bool)
+}
+
+// The pretty frontend must keep satisfying the trace capabilities --
+// a signature drift here would otherwise silently disable them.
+var _ TraceFrontend = (*frontendPretty)(nil)
+
+type extendedError interface {
+	error
+	Extensions() map[string]any
+}
+
+func quietErrorMessage(err error) (string, int, bool) {
+	if err == nil {
+		return "", 0, false
+	}
+
+	var extErr extendedError
+	if !errors.As(err, &extErr) {
+		return "", 0, false
+	}
+
+	ext := extErr.Extensions()
+	quiet, _ := ext["_quiet"].(bool)
+	if !quiet {
+		return "", 0, false
+	}
+
+	msg, _ := ext["_message"].(string)
+	if msg == "" {
+		msg = extErr.Error()
+	}
+
+	exitCode := 1
+	if code, ok := ext["_exitCode"].(float64); ok {
+		exitCode = int(code)
+	}
+
+	return msg, exitCode, true
+}
+
+func renderQuietError(w io.Writer, err error) (int, bool) {
+	msg, exitCode, ok := quietErrorMessage(err)
+	if !ok {
+		return 0, false
+	}
+	fmt.Fprintln(w, msg)
+	return exitCode, true
+}
+
 // normalizeFrontendExit ensures a frontend does not report success when the
 // primary command span itself ended in a failed state.
 func normalizeFrontendExit(err error, db *dagui.DB) error {
+	if _, exitCode, ok := quietErrorMessage(err); ok {
+		return ExitError{OriginalCode: exitCode, Original: err}
+	}
 	if err != nil || db == nil || !db.PrimarySpan.IsValid() {
 		return err
 	}
@@ -212,7 +299,9 @@ func (d *Dump) DumpID(out *termenv.Output, id *call.ID) error {
 	}
 
 	db := dagui.NewDB()
-	maps.Copy(db.Calls, dag.CallsByDigest)
+	if recipe := dag.GetRecipe(); recipe != nil {
+		maps.Copy(db.Calls, recipe.CallsByDigest)
+	}
 	r := newRenderer(db, -1, dagui.FrontendOpts{}, true)
 	if d.Newline != "" {
 		r.newline = d.Newline
@@ -377,7 +466,15 @@ func (r *renderer) renderCall( //nolint: gocyclo
 	if !specialTitle {
 		if call.ReceiverDigest != "" {
 			if !chained {
-				r.renderIDBase(out, r.db.MustCall(call.ReceiverDigest))
+				if span != nil {
+					if base := span.Base(); base != nil {
+						r.renderIDBase(out, base)
+					} else {
+						r.renderIDBase(out, r.db.MustCall(call.ReceiverDigest))
+					}
+				} else {
+					r.renderIDBase(out, r.db.MustCall(call.ReceiverDigest))
+				}
 			}
 			fmt.Fprint(out, out.String("."))
 		}
@@ -817,7 +914,26 @@ func humanizeTokens(v int64) string {
 // }
 
 func renderPrimaryOutput(w io.Writer, db *dagui.DB) error {
+	return replayPrimaryOutput(w, db, true)
+}
+
+// replayPrimaryOutput replays the primary span's log records to the CLI's
+// stdout/stderr. With includeStderr false only the stdout stream is replayed:
+// report mode uses this for failed runs, whose stderr stream carries the
+// engine-wrapped failure output the rendered report already covers, while
+// stdout still carries the command's own results (e.g. a shell script's
+// output from before it failed).
+func replayPrimaryOutput(w io.Writer, db *dagui.DB, includeStderr bool) error {
 	logs := db.PrimaryLogs[db.PrimarySpan]
+	if !includeStderr {
+		var stdout []sdklog.Record
+		for _, l := range logs {
+			if primaryLogStream(l) == 1 {
+				stdout = append(stdout, l)
+			}
+		}
+		logs = stdout
+	}
 	if len(logs) == 0 {
 		return nil
 	}
@@ -826,15 +942,7 @@ func renderPrimaryOutput(w io.Writer, db *dagui.DB) error {
 
 	for _, l := range logs {
 		data := l.Body().AsString()
-		var stream int
-		l.WalkAttributes(func(attr log.KeyValue) bool {
-			if attr.Key == telemetry.StdioStreamAttr {
-				stream = int(attr.Value.AsInt64())
-				return false
-			}
-			return true
-		})
-		switch stream {
+		switch primaryLogStream(l) {
 		case 1: // stdout
 			if _, err := fmt.Fprint(os.Stdout, data); err != nil {
 				return err
@@ -858,6 +966,20 @@ func renderPrimaryOutput(w io.Writer, db *dagui.DB) error {
 		fmt.Fprintln(os.Stdout)
 	}
 	return nil
+}
+
+// primaryLogStream returns the stdio stream a primary log record was written
+// to: 1 for stdout, 2 for stderr, 0 when unmarked.
+func primaryLogStream(l sdklog.Record) int {
+	var stream int
+	l.WalkAttributes(func(attr log.KeyValue) bool {
+		if attr.Key == telemetry.StdioStreamAttr {
+			stream = int(attr.Value.AsInt64())
+			return false
+		}
+		return true
+	})
+	return stream
 }
 
 func skipLoggedOutTraceMsg() bool {

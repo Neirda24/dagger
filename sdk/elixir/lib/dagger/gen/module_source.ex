@@ -40,6 +40,9 @@ defmodule Dagger.ModuleSource do
     Client.execute(module_source.client, query_builder)
   end
 
+  @deprecated """
+  Legacy dagger.json field. Generic module loading no longer honors it; use workspace modules in dagger.toml instead.
+  """
   @doc """
   The blueprint referenced by the module source.
   """
@@ -90,8 +93,9 @@ defmodule Dagger.ModuleSource do
          %Dagger.ModuleConfigClient{
            query_builder:
              QB.query()
-             |> QB.select("loadModuleConfigClientFromID")
-             |> QB.put_arg("id", id),
+             |> QB.select("node")
+             |> QB.put_arg("id", id)
+             |> QB.inline_fragment("ModuleConfigClient"),
            client: module_source.client
          }
        end}
@@ -99,7 +103,7 @@ defmodule Dagger.ModuleSource do
   end
 
   @doc """
-  Whether an existing dagger.json for the module was found.
+  Whether an existing module config file was found.
   """
   @spec config_exists(t()) :: {:ok, boolean()} | {:error, term()}
   def config_exists(%__MODULE__{} = module_source) do
@@ -137,8 +141,9 @@ defmodule Dagger.ModuleSource do
          %Dagger.ModuleSource{
            query_builder:
              QB.query()
-             |> QB.select("loadModuleSourceFromID")
-             |> QB.put_arg("id", id),
+             |> QB.select("node")
+             |> QB.put_arg("id", id)
+             |> QB.inline_fragment("ModuleSource"),
            client: module_source.client
          }
        end}
@@ -182,6 +187,20 @@ defmodule Dagger.ModuleSource do
   end
 
   @doc """
+  The generated files and directories made on top of the module source's context directory, returned as a Changeset.
+  """
+  @spec generated_context_changeset(t()) :: Dagger.Changeset.t()
+  def generated_context_changeset(%__MODULE__{} = module_source) do
+    query_builder =
+      module_source.query_builder |> QB.select("generatedContextChangeset")
+
+    %Dagger.Changeset{
+      query_builder: query_builder,
+      client: module_source.client
+    }
+  end
+
+  @doc """
   The generated files and directories made on top of the module source's context directory.
   """
   @spec generated_context_directory(t()) :: Dagger.Directory.t()
@@ -220,7 +239,7 @@ defmodule Dagger.ModuleSource do
   @doc """
   A unique identifier for this ModuleSource.
   """
-  @spec id(t()) :: {:ok, Dagger.ModuleSourceID.t()} | {:error, term()}
+  @spec id(t()) :: {:ok, String.t()} | {:error, term()}
   def id(%__MODULE__{} = module_source) do
     query_builder =
       module_source.query_builder |> QB.select("id")
@@ -283,7 +302,7 @@ defmodule Dagger.ModuleSource do
   end
 
   @doc """
-  The original name of the module as read from the module's dagger.json (or set for the first time with the withName API).
+  The original name of the module as read from the module config file (or set for the first time with the withName API).
   """
   @spec module_original_name(t()) :: {:ok, String.t()} | {:error, term()}
   def module_original_name(%__MODULE__{} = module_source) do
@@ -341,7 +360,7 @@ defmodule Dagger.ModuleSource do
   end
 
   @doc """
-  The path, relative to the context directory, that contains the module's dagger.json.
+  The path, relative to the context directory, that contains the module config.
   """
   @spec source_root_subpath(t()) :: {:ok, String.t()} | {:error, term()}
   def source_root_subpath(%__MODULE__{} = module_source) do
@@ -375,13 +394,17 @@ defmodule Dagger.ModuleSource do
        %Dagger.ModuleSource{
          query_builder:
            QB.query()
-           |> QB.select("loadModuleSourceFromID")
-           |> QB.put_arg("id", id),
+           |> QB.select("node")
+           |> QB.put_arg("id", id)
+           |> QB.inline_fragment("ModuleSource"),
          client: module_source.client
        }}
     end
   end
 
+  @deprecated """
+  Legacy dagger.json field. Generic module loading no longer honors it; use workspace modules in dagger.toml instead.
+  """
   @doc """
   The toolchains referenced by the module source.
   """
@@ -396,12 +419,29 @@ defmodule Dagger.ModuleSource do
          %Dagger.ModuleSource{
            query_builder:
              QB.query()
-             |> QB.select("loadModuleSourceFromID")
-             |> QB.put_arg("id", id),
+             |> QB.select("node")
+             |> QB.put_arg("id", id)
+             |> QB.inline_fragment("ModuleSource"),
            client: module_source.client
          }
        end}
     end
+  end
+
+  @doc """
+  The module's dagger.json with any in-memory edits from with* APIs applied, as a diff relative to the source's context directory.
+
+  Unlike generatedContextDirectory, this does not run codegen and does not validate the engine version against the running engine, so it can be used to declare an engine requirement newer than the running engine. Loading or serving such a module still fails at moduleSource.asModule.
+  """
+  @spec updated_config_directory(t()) :: Dagger.Directory.t()
+  def updated_config_directory(%__MODULE__{} = module_source) do
+    query_builder =
+      module_source.query_builder |> QB.select("updatedConfigDirectory")
+
+    %Dagger.Directory{
+      query_builder: query_builder,
+      client: module_source.client
+    }
   end
 
   @doc """
@@ -429,6 +469,9 @@ defmodule Dagger.ModuleSource do
     Client.execute(module_source.client, query_builder)
   end
 
+  @deprecated """
+  Legacy dagger.json field. Generic module loading no longer honors it; use workspace modules in `dagger.toml` instead.
+  """
   @doc """
   Set a blueprint for the module source.
   """
@@ -465,7 +508,7 @@ defmodule Dagger.ModuleSource do
   @doc """
   Append the provided dependencies to the module source's dependency list.
   """
-  @spec with_dependencies(t(), [Dagger.ModuleSourceID.t()]) :: Dagger.ModuleSource.t()
+  @spec with_dependencies(t(), [String.t()]) :: Dagger.ModuleSource.t()
   def with_dependencies(%__MODULE__{} = module_source, dependencies) do
     query_builder =
       module_source.query_builder
@@ -567,10 +610,13 @@ defmodule Dagger.ModuleSource do
     }
   end
 
+  @deprecated """
+  Legacy dagger.json field. Generic module loading no longer honors it; use workspace modules in `dagger.toml` instead.
+  """
   @doc """
   Add toolchains to the module source.
   """
-  @spec with_toolchains(t(), [Dagger.ModuleSourceID.t()]) :: Dagger.ModuleSource.t()
+  @spec with_toolchains(t(), [String.t()]) :: Dagger.ModuleSource.t()
   def with_toolchains(%__MODULE__{} = module_source, toolchains) do
     query_builder =
       module_source.query_builder
@@ -583,6 +629,9 @@ defmodule Dagger.ModuleSource do
     }
   end
 
+  @deprecated """
+  Legacy dagger.json field. Generic module loading no longer honors it; use workspace modules in `dagger.toml` instead.
+  """
   @doc """
   Update the blueprint module to the latest version.
   """
@@ -613,6 +662,9 @@ defmodule Dagger.ModuleSource do
     }
   end
 
+  @deprecated """
+  Legacy dagger.json field. Generic module loading no longer honors it; use workspace modules in `dagger.toml` instead.
+  """
   @doc """
   Update one or more toolchains.
   """
@@ -645,6 +697,9 @@ defmodule Dagger.ModuleSource do
     }
   end
 
+  @deprecated """
+  Legacy dagger.json field. Generic module loading no longer honors it; use workspace modules in `dagger.toml` instead.
+  """
   @doc """
   Remove the current blueprint from the module source.
   """
@@ -706,6 +761,9 @@ defmodule Dagger.ModuleSource do
     }
   end
 
+  @deprecated """
+  Legacy dagger.json field. Generic module loading no longer honors it; use workspace modules in `dagger.toml` instead.
+  """
   @doc """
   Remove the provided toolchains from the module source.
   """
@@ -732,6 +790,17 @@ end
 
 defimpl Nestru.Decoder, for: Dagger.ModuleSource do
   def decode_fields_hint(_struct, _context, id) do
-    {:ok, Dagger.Client.load_module_source_from_id(Dagger.Global.dag(), id)}
+    alias Dagger.Core.QueryBuilder, as: QB
+    dag = Dagger.Global.dag()
+
+    {:ok,
+     %Dagger.ModuleSource{
+       query_builder:
+         dag.query_builder
+         |> QB.select("node")
+         |> QB.put_arg("id", id)
+         |> QB.inline_fragment("ModuleSource"),
+       client: dag.client
+     }}
   end
 end

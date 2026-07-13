@@ -10,15 +10,14 @@ import (
 	"github.com/containerd/containerd/v2/core/content"
 	"github.com/containerd/containerd/v2/pkg/reference"
 	cerrdefs "github.com/containerd/errdefs"
+	bksnapshots "github.com/dagger/dagger/engine/snapshots"
 	"github.com/dagger/dagger/internal/buildkit/cache/config"
 	"github.com/dagger/dagger/internal/buildkit/session"
 	"github.com/dagger/dagger/internal/buildkit/solver"
 	"github.com/dagger/dagger/internal/buildkit/util/bklog"
 	"github.com/dagger/dagger/internal/buildkit/util/compression"
 	"github.com/dagger/dagger/internal/buildkit/util/contentutil"
-	"github.com/dagger/dagger/internal/buildkit/util/leaseutil"
 	"github.com/dagger/dagger/internal/buildkit/util/progress/logs"
-	"github.com/dagger/dagger/internal/buildkit/util/pull/pullprogress"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
@@ -36,7 +35,7 @@ type Unlazier interface {
 // appended to the result.
 // Note: Use WorkerRef.GetRemotes instead as moby integration requires custom GetRemotes implementation.
 func (sr *immutableRef) GetRemotes(ctx context.Context, createIfNeeded bool, refCfg config.RefConfig, all bool, s session.Group) ([]*solver.Remote, error) {
-	ctx, done, err := leaseutil.WithLease(ctx, sr.cm.LeaseManager, leaseutil.MakeTemporary)
+	ctx, done, err := bksnapshots.WithLease(ctx, sr.cm.LeaseManager, bksnapshots.MakeTemporary)
 	if err != nil {
 		return nil, err
 	}
@@ -358,10 +357,7 @@ func (p lazyRefProvider) Unlazy(ctx context.Context) error {
 		// For now, just pull down the whole content and then return a ReaderAt from the local content
 		// store. If efficient partial reads are desired in the future, something more like a "tee"
 		// that caches remote partial reads to a local store may need to replace this.
-		err := contentutil.Copy(ctx, p.ref.cm.ContentStore, &pullprogress.ProviderWithProgress{
-			Provider: p.dh.Provider(p.session),
-			Manager:  p.ref.cm.ContentStore,
-		}, p.desc, p.dh.Ref, logs.LoggerFromContext(ctx))
+		err := contentutil.Copy(ctx, p.ref.cm.ContentStore, p.dh.Provider(p.session), p.desc, p.dh.Ref, logs.LoggerFromContext(ctx))
 		if err != nil {
 			return struct{}{}, err
 		}

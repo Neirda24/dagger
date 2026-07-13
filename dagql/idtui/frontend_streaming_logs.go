@@ -23,6 +23,7 @@ type streamingLogExporter struct {
 	out         TermOutput
 	prefixW     *multiprefixw.Writer
 	pendingLogs map[dagui.SpanID][]sdklog.Record
+	testLogs    map[dagui.SpanID]*Vterm
 }
 
 // Export processes log records: exports to the DB, groups by span, and either
@@ -40,7 +41,10 @@ func (s *streamingLogExporter) Export(ctx context.Context, records []sdklog.Reco
 	// Group records by span and either flush immediately if span exists, or store for later
 	spanGroups := make(map[dagui.SpanID][]sdklog.Record)
 	for _, record := range records {
-		spanID := dagui.SpanID{SpanID: record.SpanID()}
+		spanID := s.db.LogTargetSpanID(record)
+		if !spanID.IsValid() {
+			continue
+		}
 		spanGroups[spanID] = append(spanGroups[spanID], record)
 	}
 
@@ -62,6 +66,8 @@ func (s *streamingLogExporter) Export(ctx context.Context, records []sdklog.Reco
 // flushLogsForSpan writes logs for a specific span with proper prefix.
 // The caller must hold the mutex.
 func (s *streamingLogExporter) flushLogsForSpan(spanID dagui.SpanID, records []sdklog.Record) {
+	appendTestSummaryLogRecords(s.testLogs, s.profile, spanID, records)
+
 	// Get span info from DB
 	dbSpan := s.db.Spans.Map[spanID]
 	if dbSpan == nil {
@@ -123,9 +129,13 @@ func (s *streamingLogExporter) flushLogsForSpan(spanID dagui.SpanID, records []s
 	}
 }
 
-// flushPendingLogsForSpan flushes any pending logs when a span becomes available.
+// flushResolvedLogsForSpan flushes any logs that became routable once the span
+// or its creator became available.
 // The caller must hold the mutex.
-func (s *streamingLogExporter) flushPendingLogsForSpan(spanID dagui.SpanID) {
+func (s *streamingLogExporter) flushResolvedLogsForSpan(spanID dagui.SpanID) {
+	if records := s.db.DrainResolvedLogs(spanID); len(records) > 0 {
+		s.flushLogsForSpan(spanID, records)
+	}
 	if records, exists := s.pendingLogs[spanID]; exists {
 		s.flushLogsForSpan(spanID, records)
 		delete(s.pendingLogs, spanID)

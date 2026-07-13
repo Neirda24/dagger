@@ -8,7 +8,7 @@ declare(strict_types=1);
 
 namespace Dagger;
 
-class Binding extends Client\AbstractObject implements Client\IdAble
+class Binding extends Client\AbstractObject implements Client\IdAble, Node
 {
     /**
      * Retrieve the binding value, as type Address
@@ -71,6 +71,33 @@ class Binding extends Client\AbstractObject implements Client\IdAble
     {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('asContainer');
         return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * Retrieve the binding value, as type CurrentModuleAsSDK
+     */
+    public function asCurrentModuleAsSDK(): CurrentModuleAsSDK
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('asCurrentModuleAsSDK');
+        return new \Dagger\CurrentModuleAsSDK($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * Retrieve the binding value, as type CurrentModuleAsSDKClient
+     */
+    public function asCurrentModuleAsSDKClient(): CurrentModuleAsSDKClient
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('asCurrentModuleAsSDKClient');
+        return new \Dagger\CurrentModuleAsSDKClient($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * Retrieve the binding value, as type CurrentModuleAsSDKModule
+     */
+    public function asCurrentModuleAsSDKModule(): CurrentModuleAsSDKModule
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('asCurrentModuleAsSDKModule');
+        return new \Dagger\CurrentModuleAsSDKModule($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
     /**
@@ -155,6 +182,15 @@ class Binding extends Client\AbstractObject implements Client\IdAble
     }
 
     /**
+     * Retrieve the binding value, as type HTTPState
+     */
+    public function asHTTPState(): HTTPState
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('asHTTPState');
+        return new \Dagger\HTTPState($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
      * Retrieve the binding value, as type JSONValue
      */
     public function asJSONValue(): JsonValue
@@ -197,6 +233,15 @@ class Binding extends Client\AbstractObject implements Client\IdAble
     {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('asPhpSdk');
         return new \Dagger\PhpSdk($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * Retrieve the binding value, as type Schema
+     */
+    public function asSchema(): Schema
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('asSchema');
+        return new \Dagger\Schema($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
     /**
@@ -290,6 +335,51 @@ class Binding extends Client\AbstractObject implements Client\IdAble
     }
 
     /**
+     * Retrieve the binding value, as type WorkspaceGit
+     */
+    public function asWorkspaceGit(): WorkspaceGit
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('asWorkspaceGit');
+        return new \Dagger\WorkspaceGit($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * Retrieve the binding value, as type WorkspaceMigration
+     */
+    public function asWorkspaceMigration(): WorkspaceMigration
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('asWorkspaceMigration');
+        return new \Dagger\WorkspaceMigration($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * Retrieve the binding value, as type WorkspaceMigrationStep
+     */
+    public function asWorkspaceMigrationStep(): WorkspaceMigrationStep
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('asWorkspaceMigrationStep');
+        return new \Dagger\WorkspaceMigrationStep($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * Retrieve the binding value, as type WorkspaceModule
+     */
+    public function asWorkspaceModule(): WorkspaceModule
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('asWorkspaceModule');
+        return new \Dagger\WorkspaceModule($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * Retrieve the binding value, as type WorkspaceModuleSetting
+     */
+    public function asWorkspaceModuleSetting(): WorkspaceModuleSetting
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('asWorkspaceModuleSetting');
+        return new \Dagger\WorkspaceModuleSetting($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
      * Returns the digest of the binding value
      */
     public function digest(): string
@@ -301,10 +391,10 @@ class Binding extends Client\AbstractObject implements Client\IdAble
     /**
      * A unique identifier for this Binding.
      */
-    public function id(): BindingId
+    public function id(): Id
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('id');
-        return new \Dagger\BindingId((string)$this->queryLeaf($leafQueryBuilder, 'id'));
+        return new \Dagger\Id((string)$this->queryLeaf($leafQueryBuilder, 'id'));
     }
 
     /**

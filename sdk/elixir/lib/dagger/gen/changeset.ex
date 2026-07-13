@@ -69,6 +69,29 @@ defmodule Dagger.Changeset do
   end
 
   @doc """
+  Structured per-path diff statistics (kind and line counts) for this changeset.
+  """
+  @spec diff_stats(t()) :: {:ok, [Dagger.DiffStat.t()]} | {:error, term()}
+  def diff_stats(%__MODULE__{} = changeset) do
+    query_builder =
+      changeset.query_builder |> QB.select("diffStats") |> QB.select("id")
+
+    with {:ok, items} <- Client.execute(changeset.client, query_builder) do
+      {:ok,
+       for %{"id" => id} <- items do
+         %Dagger.DiffStat{
+           query_builder:
+             QB.query()
+             |> QB.select("node")
+             |> QB.put_arg("id", id)
+             |> QB.inline_fragment("DiffStat"),
+           client: changeset.client
+         }
+       end}
+    end
+  end
+
+  @doc """
   Applies the diff represented by this changeset to a path on the host.
   """
   @spec export(t(), String.t()) :: {:ok, String.t()} | {:error, term()}
@@ -82,7 +105,7 @@ defmodule Dagger.Changeset do
   @doc """
   A unique identifier for this Changeset.
   """
-  @spec id(t()) :: {:ok, Dagger.ChangesetID.t()} | {:error, term()}
+  @spec id(t()) :: {:ok, String.t()} | {:error, term()}
   def id(%__MODULE__{} = changeset) do
     query_builder =
       changeset.query_builder |> QB.select("id")
@@ -150,11 +173,56 @@ defmodule Dagger.Changeset do
        %Dagger.Changeset{
          query_builder:
            QB.query()
-           |> QB.select("loadChangesetFromID")
-           |> QB.put_arg("id", id),
+           |> QB.select("node")
+           |> QB.put_arg("id", id)
+           |> QB.inline_fragment("Changeset"),
          client: changeset.client
        }}
     end
+  end
+
+  @doc """
+  Add changes to an existing changeset
+
+  By default the operation will fail in case of conflicts, for instance a file modified in both changesets. The behavior can be adjusted using onConflict argument
+  """
+  @spec with_changeset(t(), Dagger.Changeset.t(), [
+          {:on_conflict, Dagger.ChangesetMergeConflict.t() | nil}
+        ]) :: Dagger.Changeset.t()
+  def with_changeset(%__MODULE__{} = changeset, changes, optional_args \\ []) do
+    query_builder =
+      changeset.query_builder
+      |> QB.select("withChangeset")
+      |> QB.put_arg("changes", Dagger.ID.id!(changes))
+      |> QB.maybe_put_arg("onConflict", optional_args[:on_conflict])
+
+    %Dagger.Changeset{
+      query_builder: query_builder,
+      client: changeset.client
+    }
+  end
+
+  @doc """
+  Add changes from multiple changesets using git octopus merge strategy
+
+  This is more efficient than chaining multiple withChangeset calls when merging many changesets.
+
+  Only FAIL and FAIL_EARLY conflict strategies are supported (octopus merge cannot use -X ours/theirs).
+  """
+  @spec with_changesets(t(), [String.t()], [
+          {:on_conflict, Dagger.ChangesetsMergeConflict.t() | nil}
+        ]) :: Dagger.Changeset.t()
+  def with_changesets(%__MODULE__{} = changeset, changes, optional_args \\ []) do
+    query_builder =
+      changeset.query_builder
+      |> QB.select("withChangesets")
+      |> QB.put_arg("changes", changes)
+      |> QB.maybe_put_arg("onConflict", optional_args[:on_conflict])
+
+    %Dagger.Changeset{
+      query_builder: query_builder,
+      client: changeset.client
+    }
   end
 end
 
@@ -167,6 +235,17 @@ end
 
 defimpl Nestru.Decoder, for: Dagger.Changeset do
   def decode_fields_hint(_struct, _context, id) do
-    {:ok, Dagger.Client.load_changeset_from_id(Dagger.Global.dag(), id)}
+    alias Dagger.Core.QueryBuilder, as: QB
+    dag = Dagger.Global.dag()
+
+    {:ok,
+     %Dagger.Changeset{
+       query_builder:
+         dag.query_builder
+         |> QB.select("node")
+         |> QB.put_arg("id", id)
+         |> QB.inline_fragment("Changeset"),
+       client: dag.client
+     }}
   end
 end

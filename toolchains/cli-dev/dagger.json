@@ -1,6 +1,6 @@
 {
   "name": "cli-dev",
-  "engineVersion": "v0.20.3",
+  "engineVersion": "v0.21.7",
   "sdk": {
     "source": "go"
   },
@@ -17,10 +17,9 @@
     {
       "name": "go",
       "source": "../go"
-    },
-    {
-      "name": "version",
-      "source": "../../version"
     }
-  ]
+  ],
+  "codegen": {
+    "automaticGitignore": false
+  }
 }

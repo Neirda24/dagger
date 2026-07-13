@@ -30,7 +30,6 @@ import (
 	"github.com/dagger/dagger/internal/buildkit/util/appcontext"
 	"github.com/dagger/dagger/internal/buildkit/util/bklog"
 	"github.com/dagger/dagger/internal/buildkit/util/disk"
-	"github.com/dagger/dagger/internal/buildkit/util/profiler"
 	"github.com/dagger/dagger/internal/buildkit/util/stack"
 	"github.com/dagger/dagger/internal/buildkit/version"
 	"github.com/gofrs/flock"
@@ -39,17 +38,16 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 
-	"github.com/dagger/dagger/engine/buildkit/cacerts"
 	"github.com/dagger/dagger/engine/ebpf/filetracer"
 	"github.com/dagger/dagger/engine/ebpf/ovltracer"
+	"github.com/dagger/dagger/engine/engineutil/cacerts"
 	"github.com/dagger/dagger/engine/server"
 	"github.com/dagger/dagger/engine/slog"
+	"github.com/dagger/dagger/engine/wcprof"
 	"github.com/dagger/dagger/network"
 	"github.com/dagger/dagger/network/netinst"
 	telemetry "github.com/dagger/otel-go"
@@ -163,6 +161,11 @@ func addFlags(app *cli.App) {
 		cli.BoolFlag{
 			Name:  "extra-debug",
 			Usage: "enable extra debug output in logs",
+		},
+		cli.BoolFlag{
+			Name:   "wcprof",
+			Usage:  "enable experimental wall-clock profiling for all work on the engine (also enabled by the _DAGGER_WCPROF env var; toggleable at runtime via the /debug/wcprof/enabled debug endpoint)",
+			Hidden: true,
 		},
 		cli.BoolFlag{
 			Name:  "trace",
@@ -315,6 +318,10 @@ func main() { //nolint:gocyclo
 	app.Action = func(c *cli.Context) error {
 		bklog.G(ctx).Info("starting dagger engine version:", engineVersion)
 		defer cancel(errors.New("main done"))
+
+		if c.GlobalBool("wcprof") {
+			wcprof.EnableGlobal()
+		}
 		// TODO: On Windows this always returns -1. The actual "are you admin" check is very Windows-specific.
 		// See https://github.com/golang/go/issues/28804#issuecomment-505326268 for the "short" version.
 		if os.Geteuid() > 0 {
@@ -440,12 +447,6 @@ func main() { //nolint:gocyclo
 
 		bklog.G(context.Background()).Infof("engine name: %s", engineName)
 
-		if bkcfg.GRPC.DebugAddress != "" {
-			if err := setupDebugHandlers(bkcfg.GRPC.DebugAddress); err != nil {
-				return err
-			}
-		}
-
 		bklog.G(ctx).Debug("creating engine GRPC server")
 		grpcServer := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()))
 
@@ -484,7 +485,34 @@ func main() { //nolint:gocyclo
 		if err != nil {
 			return fmt.Errorf("failed to create engine: %w", err)
 		}
-		defer srv.Close()
+		var httpServer *http.Server
+		shutdownServer := func(stopCtx context.Context) {
+			if srv == nil {
+				return
+			}
+			srv.BeginGracefulStop()
+			if httpServer != nil {
+				if err := httpServer.Shutdown(context.WithoutCancel(stopCtx)); err != nil && !errors.Is(err, http.ErrServerClosed) {
+					slog.Error("http server shutdown", "error", err)
+				}
+			}
+			grpcServer.GracefulStop()
+			if err := srv.GracefulStop(context.WithoutCancel(stopCtx)); err != nil {
+				slog.Error("server graceful stop", "error", err)
+			}
+			srv = nil
+		}
+		defer func() {
+			srvStopCtx, srvStopCancel := context.WithTimeout(context.WithoutCancel(ctx), gracefulStopTimeout)
+			defer srvStopCancel()
+			shutdownServer(srvStopCtx)
+		}()
+
+		if bkcfg.GRPC.DebugAddress != "" {
+			if err := setupDebugHandlers(bkcfg.GRPC.DebugAddress, srv); err != nil {
+				return err
+			}
+		}
 
 		// start Prometheus metrics server if configured
 		if metricsAddr := os.Getenv("_EXPERIMENTAL_DAGGER_METRICS_ADDR"); metricsAddr != "" {
@@ -501,10 +529,12 @@ func main() { //nolint:gocyclo
 		// start serving on the listeners for actual clients
 		bklog.G(ctx).Debug("starting main engine api listeners")
 		srv.Register(grpcServer)
-		http2Server := &http2.Server{}
-		httpServer := &http.Server{
+		protocols := new(http.Protocols)
+		protocols.SetHTTP1(true)
+		protocols.SetUnencryptedHTTP2(true)
+		httpServer = &http.Server{
 			ReadHeaderTimeout: 30 * time.Second,
-			Handler: h2c.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("content-type"), "application/grpc") {
 					// The docs on grpcServer.ServeHTTP warn that some features are missing vs. serving fully "native" gRPC,
 					// but in practice it seems to work fine for us and only be relevant for some advanced features we don't use.
@@ -512,10 +542,8 @@ func main() { //nolint:gocyclo
 					return
 				}
 				srv.ServeHTTP(w, r)
-			}), http2Server),
-		}
-		if err := http2.ConfigureServer(httpServer, http2Server); err != nil {
-			return fmt.Errorf("failed to configure http2 server: %w", err)
+			}),
+			Protocols: protocols,
 		}
 		errCh := make(chan error, 1)
 		if err := serveAPI(bkcfg.GRPC, httpServer, errCh); err != nil {
@@ -543,13 +571,10 @@ func main() { //nolint:gocyclo
 			notified, notifyErr := sddaemon.SdNotify(false, sddaemon.SdNotifyStopping)
 			bklog.G(ctx).Debugf("SdNotifyStopping notified=%v, err=%v", notified, notifyErr)
 		}
-		grpcServer.GracefulStop()
 
 		srvStopCtx, srvStopCancel := context.WithTimeout(context.WithoutCancel(ctx), gracefulStopTimeout)
 		defer srvStopCancel()
-		if err := srv.GracefulStop(srvStopCtx); err != nil {
-			slog.Error("server graceful stop", "error", err)
-		}
+		shutdownServer(srvStopCtx)
 
 		return err
 	}
@@ -560,8 +585,6 @@ func main() { //nolint:gocyclo
 		telemetry.Close()
 		return nil
 	}
-
-	profiler.Attach(app)
 
 	if err := app.Run(os.Args); err != nil {
 		fmt.Fprintf(os.Stderr, "dagger-engine: %+v\n", err)
@@ -736,7 +759,7 @@ func applyMainFlags(c *cli.Context, cfg *bkconfig.Config) error {
 		cfg.Workers.OCI.NetworkConfig.Mode = c.GlobalString("oci-worker-net")
 	}
 	if c.GlobalIsSet("oci-cni-config-path") {
-		cfg.Workers.OCI.NetworkConfig.CNIConfigPath = c.GlobalString("oci-cni-worker-path")
+		cfg.Workers.OCI.NetworkConfig.CNIConfigPath = c.GlobalString("oci-cni-config-path")
 	}
 	if c.GlobalIsSet("oci-cni-binary-dir") {
 		cfg.Workers.OCI.NetworkConfig.CNIBinaryPath = c.GlobalString("oci-cni-binary-dir")

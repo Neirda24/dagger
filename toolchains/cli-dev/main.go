@@ -21,12 +21,13 @@ func New(
 	//   "*",
 	//   ".*",
 	//   "!cmd/dagger/*",
+	//   "!internal/cmd/dagger/**",
 	//   "!**/go.sum",
 	//   "!**/go.mod",
 	//   "!**/*.go",
+	//   "!**/VERSION",
 	//   "!vendor/**/*",
 	//   "!**.graphql",
-	//   "!.goreleaser*.yml",
 	//   "!.changes",
 	//   "!LICENSE",
 	//   "!install.sh",
@@ -40,30 +41,27 @@ func New(
 	// +optional
 	base *dagger.Container,
 
-	// Explicit version to set on the Dagger CLI.
+	// Version of the Dagger CLI being built. Surfaced as CliDev.Version and
+	// consumed by the publish flow (goreleaser ENGINE_VERSION, S3 paths,
+	// semver release-gating). The built binary self-reports its own version
+	// from the embedded internal/version/VERSION file regardless of what's
+	// passed here; this is for publish-time metadata only.
 	// +optional
 	version string,
+
+	// Git repository for VCS info injection.
+	// +optional
+	repo *dagger.GitRepository,
 ) (*CliDev, error) {
-	// FIXME: this go builder config is duplicated with engine build
-	// move into a shared engine/builder module
-	v := dag.Version()
-
-	var err error
-	if version == "" {
-		version, err = v.Version(ctx)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	imageTag, err := v.ImageTag(ctx)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	values := []string{
-		// FIXME: how to avoid duplication with engine module?
-		"github.com/dagger/dagger/engine.Version=" + version,
-		"github.com/dagger/dagger/engine.Tag=" + imageTag,
+
+	// FIXME: this go builder config is duplicated with engine build
+	// move into a shared engine/builder module
+	var values []string
+	if version != "" {
+		values = append(values, "github.com/dagger/dagger/engine.Version="+version)
 	}
 	if runnerHost != "" {
 		values = append(values, "main.RunnerHost="+runnerHost)
@@ -76,6 +74,7 @@ func New(
 			Source: source,
 			Base:   base,
 			Values: values,
+			Repo:   repo,
 		}),
 	}, nil
 }
@@ -97,27 +96,6 @@ func (cli CliDev) Binary(
 		NoSymbols: true,
 		NoDwarf:   true,
 	})
-}
-
-// Generate a markdown CLI reference doc
-func (cli CliDev) Reference(
-	// +optional
-	frontmatter string,
-	// +optional
-	// Include experimental commands
-	includeExperimental bool,
-) *dagger.File {
-	cmd := []string{"go", "run", "./cmd/dagger", "gen", "--output", "cli.mdx"}
-	if includeExperimental {
-		cmd = append(cmd, "--include-experimental")
-	}
-	if frontmatter != "" {
-		cmd = append(cmd, "--frontmatter="+frontmatter)
-	}
-	return cli.Go.
-		Env().
-		WithExec(cmd).
-		File("cli.mdx")
 }
 
 // Build dev CLI binaries

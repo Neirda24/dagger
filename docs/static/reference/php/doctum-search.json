@@ -20,7 +20,7 @@
 			"t": "C",
 			"n": "Dagger\\AddressId",
 			"p": "Dagger/AddressId.html",
-			"d": "<p>The <code>AddressID</code> scalar type represents an identifier for an object of type Address.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -110,7 +110,7 @@
 			"t": "C",
 			"n": "Dagger\\BindingId",
 			"p": "Dagger/BindingId.html",
-			"d": "<p>The <code>BindingID</code> scalar type represents an identifier for an object of type Binding.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -140,7 +140,7 @@
 			"t": "C",
 			"n": "Dagger\\CacheVolumeId",
 			"p": "Dagger/CacheVolumeId.html",
-			"d": "<p>The <code>CacheVolumeID</code> scalar type represents an identifier for an object of type CacheVolume.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -180,7 +180,7 @@
 			"t": "C",
 			"n": "Dagger\\ChangesetId",
 			"p": "Dagger/ChangesetId.html",
-			"d": "<p>The <code>ChangesetID</code> scalar type represents an identifier for an object of type Changeset.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -210,7 +210,7 @@
 			"t": "C",
 			"n": "Dagger\\CheckGroupId",
 			"p": "Dagger/CheckGroupId.html",
-			"d": "<p>The <code>CheckGroupID</code> scalar type represents an identifier for an object of type CheckGroup.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -220,7 +220,7 @@
 			"t": "C",
 			"n": "Dagger\\CheckId",
 			"p": "Dagger/CheckId.html",
-			"d": "<p>The <code>CheckID</code> scalar type represents an identifier for an object of type Check.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -231,6 +231,26 @@
 			"n": "Dagger\\Client",
 			"p": "Dagger/Client.html",
 			"d": "<p>The root of the DAG.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\ClientFilesyncMirror",
+			"p": "Dagger/ClientFilesyncMirror.html",
+			"d": "<p>An internal persistent filesync mirror.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\ClientFilesyncMirrorId",
+			"p": "Dagger/ClientFilesyncMirrorId.html",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -320,7 +340,7 @@
 			"t": "C",
 			"n": "Dagger\\CloudId",
 			"p": "Dagger/CloudId.html",
-			"d": "<p>The <code>CloudID</code> scalar type represents an identifier for an object of type Cloud.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -350,7 +370,7 @@
 			"t": "C",
 			"n": "Dagger\\ContainerId",
 			"p": "Dagger/ContainerId.html",
-			"d": "<p>The <code>ContainerID</code> scalar type represents an identifier for an object of type Container.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -368,9 +388,39 @@
 		},
 		{
 			"t": "C",
+			"n": "Dagger\\CurrentModuleAsSDK",
+			"p": "Dagger/CurrentModuleAsSDK.html",
+			"d": "<p>The SDK-role data for the currently executing module, as installed in the active workspace.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\CurrentModuleAsSDKClient",
+			"p": "Dagger/CurrentModuleAsSDKClient.html",
+			"d": "<p>A generated client the current SDK produces in the workspace.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\CurrentModuleAsSDKModule",
+			"p": "Dagger/CurrentModuleAsSDKModule.html",
+			"d": "<p>A workspace-local module managed by the current SDK.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
 			"n": "Dagger\\CurrentModuleId",
 			"p": "Dagger/CurrentModuleId.html",
-			"d": "<p>The <code>CurrentModuleID</code> scalar type represents an identifier for an object of type CurrentModule.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -400,7 +450,7 @@
 			"t": "C",
 			"n": "Dagger\\DiffStatId",
 			"p": "Dagger/DiffStatId.html",
-			"d": "<p>The <code>DiffStatID</code> scalar type represents an identifier for an object of type DiffStat.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -420,7 +470,7 @@
 			"t": "C",
 			"n": "Dagger\\DirectoryId",
 			"p": "Dagger/DirectoryId.html",
-			"d": "<p>The <code>DirectoryID</code> scalar type represents an identifier for an object of type Directory.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -460,7 +510,7 @@
 			"t": "C",
 			"n": "Dagger\\EngineCacheEntryId",
 			"p": "Dagger/EngineCacheEntryId.html",
-			"d": "<p>The <code>EngineCacheEntryID</code> scalar type represents an identifier for an object of type EngineCacheEntry.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -480,7 +530,7 @@
 			"t": "C",
 			"n": "Dagger\\EngineCacheEntrySetId",
 			"p": "Dagger/EngineCacheEntrySetId.html",
-			"d": "<p>The <code>EngineCacheEntrySetID</code> scalar type represents an identifier for an object of type EngineCacheEntrySet.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -490,7 +540,7 @@
 			"t": "C",
 			"n": "Dagger\\EngineCacheId",
 			"p": "Dagger/EngineCacheId.html",
-			"d": "<p>The <code>EngineCacheID</code> scalar type represents an identifier for an object of type EngineCache.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -500,7 +550,7 @@
 			"t": "C",
 			"n": "Dagger\\EngineId",
 			"p": "Dagger/EngineId.html",
-			"d": "<p>The <code>EngineID</code> scalar type represents an identifier for an object of type Engine.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -520,7 +570,7 @@
 			"t": "C",
 			"n": "Dagger\\EnumTypeDefId",
 			"p": "Dagger/EnumTypeDefId.html",
-			"d": "<p>The <code>EnumTypeDefID</code> scalar type represents an identifier for an object of type EnumTypeDef.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -540,7 +590,7 @@
 			"t": "C",
 			"n": "Dagger\\EnumValueTypeDefId",
 			"p": "Dagger/EnumValueTypeDefId.html",
-			"d": "<p>The <code>EnumValueTypeDefID</code> scalar type represents an identifier for an object of type EnumValueTypeDef.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -570,7 +620,7 @@
 			"t": "C",
 			"n": "Dagger\\EnvFileId",
 			"p": "Dagger/EnvFileId.html",
-			"d": "<p>The <code>EnvFileID</code> scalar type represents an identifier for an object of type EnvFile.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -580,7 +630,7 @@
 			"t": "C",
 			"n": "Dagger\\EnvId",
 			"p": "Dagger/EnvId.html",
-			"d": "<p>The <code>EnvID</code> scalar type represents an identifier for an object of type Env.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -600,7 +650,7 @@
 			"t": "C",
 			"n": "Dagger\\EnvVariableId",
 			"p": "Dagger/EnvVariableId.html",
-			"d": "<p>The <code>EnvVariableID</code> scalar type represents an identifier for an object of type EnvVariable.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -620,7 +670,7 @@
 			"t": "C",
 			"n": "Dagger\\ErrorId",
 			"p": "Dagger/ErrorId.html",
-			"d": "<p>The <code>ErrorID</code> scalar type represents an identifier for an object of type Error.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -640,7 +690,37 @@
 			"t": "C",
 			"n": "Dagger\\ErrorValueId",
 			"p": "Dagger/ErrorValueId.html",
-			"d": "<p>The <code>ErrorValueID</code> scalar type represents an identifier for an object of type ErrorValue.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\Exportable",
+			"p": "Dagger/Exportable.html",
+			"d": "<p>An object that can be exported to the host.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\ExportableClient",
+			"p": "Dagger/ExportableClient.html",
+			"d": "<p>Query-builder client for the Exportable interface.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\ExportableId",
+			"p": "Dagger/ExportableId.html",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -660,7 +740,7 @@
 			"t": "C",
 			"n": "Dagger\\FieldTypeDefId",
 			"p": "Dagger/FieldTypeDefId.html",
-			"d": "<p>The <code>FieldTypeDefID</code> scalar type represents an identifier for an object of type FieldTypeDef.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -680,7 +760,7 @@
 			"t": "C",
 			"n": "Dagger\\FileId",
 			"p": "Dagger/FileId.html",
-			"d": "<p>The <code>FileID</code> scalar type represents an identifier for an object of type File.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -700,7 +780,7 @@
 			"t": "C",
 			"n": "Dagger\\FunctionArgId",
 			"p": "Dagger/FunctionArgId.html",
-			"d": "<p>The <code>FunctionArgID</code> scalar type represents an identifier for an object of type FunctionArg.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -730,7 +810,7 @@
 			"t": "C",
 			"n": "Dagger\\FunctionCallArgValueId",
 			"p": "Dagger/FunctionCallArgValueId.html",
-			"d": "<p>The <code>FunctionCallArgValueID</code> scalar type represents an identifier for an object of type FunctionCallArgValue.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -740,7 +820,7 @@
 			"t": "C",
 			"n": "Dagger\\FunctionCallId",
 			"p": "Dagger/FunctionCallId.html",
-			"d": "<p>The <code>FunctionCallID</code> scalar type represents an identifier for an object of type FunctionCall.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -750,7 +830,7 @@
 			"t": "C",
 			"n": "Dagger\\FunctionId",
 			"p": "Dagger/FunctionId.html",
-			"d": "<p>The <code>FunctionID</code> scalar type represents an identifier for an object of type Function.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -761,6 +841,16 @@
 			"n": "Dagger\\Function_",
 			"p": "Dagger/Function_.html",
 			"d": "<p>Function represents a resolver provided by a Module.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\Function_Id",
+			"p": "Dagger/Function_Id.html",
+			"d": "<p>The <code>FunctionID</code> scalar type represents an identifier for an object of type Function.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -780,7 +870,7 @@
 			"t": "C",
 			"n": "Dagger\\GeneratedCodeId",
 			"p": "Dagger/GeneratedCodeId.html",
-			"d": "<p>The <code>GeneratedCodeID</code> scalar type represents an identifier for an object of type GeneratedCode.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -810,7 +900,7 @@
 			"t": "C",
 			"n": "Dagger\\GeneratorGroupId",
 			"p": "Dagger/GeneratorGroupId.html",
-			"d": "<p>The <code>GeneratorGroupID</code> scalar type represents an identifier for an object of type GeneratorGroup.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -820,7 +910,7 @@
 			"t": "C",
 			"n": "Dagger\\GeneratorId",
 			"p": "Dagger/GeneratorId.html",
-			"d": "<p>The <code>GeneratorID</code> scalar type represents an identifier for an object of type Generator.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -840,7 +930,7 @@
 			"t": "C",
 			"n": "Dagger\\GitRefId",
 			"p": "Dagger/GitRefId.html",
-			"d": "<p>The <code>GitRefID</code> scalar type represents an identifier for an object of type GitRef.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -860,7 +950,27 @@
 			"t": "C",
 			"n": "Dagger\\GitRepositoryId",
 			"p": "Dagger/GitRepositoryId.html",
-			"d": "<p>The <code>GitRepositoryID</code> scalar type represents an identifier for an object of type GitRepository.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\HTTPState",
+			"p": "Dagger/HTTPState.html",
+			"d": "<p>An internal persistent HTTP state.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\HTTPStateId",
+			"p": "Dagger/HTTPStateId.html",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -880,7 +990,7 @@
 			"t": "C",
 			"n": "Dagger\\HealthcheckConfigId",
 			"p": "Dagger/HealthcheckConfigId.html",
-			"d": "<p>The <code>HealthcheckConfigID</code> scalar type represents an identifier for an object of type HealthcheckConfig.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -900,7 +1010,17 @@
 			"t": "C",
 			"n": "Dagger\\HostId",
 			"p": "Dagger/HostId.html",
-			"d": "<p>The <code>HostID</code> scalar type represents an identifier for an object of type Host.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\Id",
+			"p": "Dagger/Id.html",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -920,7 +1040,7 @@
 			"t": "C",
 			"n": "Dagger\\InputTypeDefId",
 			"p": "Dagger/InputTypeDefId.html",
-			"d": "<p>The <code>InputTypeDefID</code> scalar type represents an identifier for an object of type InputTypeDef.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -940,7 +1060,7 @@
 			"t": "C",
 			"n": "Dagger\\InterfaceTypeDefId",
 			"p": "Dagger/InterfaceTypeDefId.html",
-			"d": "<p>The <code>InterfaceTypeDefID</code> scalar type represents an identifier for an object of type InterfaceTypeDef.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -970,7 +1090,7 @@
 			"t": "C",
 			"n": "Dagger\\JsonValueId",
 			"p": "Dagger/JsonValueId.html",
-			"d": "<p>The <code>JSONValueID</code> scalar type represents an identifier for an object of type JSONValue.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -990,7 +1110,7 @@
 			"t": "C",
 			"n": "Dagger\\LLMId",
 			"p": "Dagger/LLMId.html",
-			"d": "<p>The <code>LLMID</code> scalar type represents an identifier for an object of type LLM.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1010,7 +1130,7 @@
 			"t": "C",
 			"n": "Dagger\\LLMTokenUsageId",
 			"p": "Dagger/LLMTokenUsageId.html",
-			"d": "<p>The <code>LLMTokenUsageID</code> scalar type represents an identifier for an object of type LLMTokenUsage.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1030,7 +1150,7 @@
 			"t": "C",
 			"n": "Dagger\\LabelId",
 			"p": "Dagger/LabelId.html",
-			"d": "<p>The <code>LabelID</code> scalar type represents an identifier for an object of type Label.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1050,7 +1170,7 @@
 			"t": "C",
 			"n": "Dagger\\ListTypeDefId",
 			"p": "Dagger/ListTypeDefId.html",
-			"d": "<p>The <code>ListTypeDefID</code> scalar type represents an identifier for an object of type ListTypeDef.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1080,7 +1200,7 @@
 			"t": "C",
 			"n": "Dagger\\ModuleConfigClientId",
 			"p": "Dagger/ModuleConfigClientId.html",
-			"d": "<p>The <code>ModuleConfigClientID</code> scalar type represents an identifier for an object of type ModuleConfigClient.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1090,7 +1210,7 @@
 			"t": "C",
 			"n": "Dagger\\ModuleId",
 			"p": "Dagger/ModuleId.html",
-			"d": "<p>The <code>ModuleID</code> scalar type represents an identifier for an object of type Module.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1110,7 +1230,27 @@
 			"t": "C",
 			"n": "Dagger\\ModuleSourceId",
 			"p": "Dagger/ModuleSourceId.html",
-			"d": "<p>The <code>ModuleSourceID</code> scalar type represents an identifier for an object of type ModuleSource.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\Node",
+			"p": "Dagger/Node.html",
+			"d": "<p>An object with a globally unique ID.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\NodeClient",
+			"p": "Dagger/NodeClient.html",
+			"d": "<p>Query-builder client for the Node interface.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1130,7 +1270,7 @@
 			"t": "C",
 			"n": "Dagger\\ObjectTypeDefId",
 			"p": "Dagger/ObjectTypeDefId.html",
-			"d": "<p>The <code>ObjectTypeDefID</code> scalar type represents an identifier for an object of type ObjectTypeDef.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1150,7 +1290,7 @@
 			"t": "C",
 			"n": "Dagger\\PhpSdkId",
 			"p": "Dagger/PhpSdkId.html",
-			"d": "<p>The <code>PhpSdkID</code> scalar type represents an identifier for an object of type PhpSdk.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1200,7 +1340,7 @@
 			"t": "C",
 			"n": "Dagger\\PortId",
 			"p": "Dagger/PortId.html",
-			"d": "<p>The <code>PortID</code> scalar type represents an identifier for an object of type Port.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1211,6 +1351,26 @@
 			"n": "Dagger\\QueryId",
 			"p": "Dagger/QueryId.html",
 			"d": "<p>The <code>QueryID</code> scalar type represents an identifier for an object of type Query.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\RemoteGitMirror",
+			"p": "Dagger/RemoteGitMirror.html",
+			"d": "<p>An internal persistent bare git mirror.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\RemoteGitMirrorId",
+			"p": "Dagger/RemoteGitMirrorId.html",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1230,7 +1390,7 @@
 			"t": "C",
 			"n": "Dagger\\SDKConfigId",
 			"p": "Dagger/SDKConfigId.html",
-			"d": "<p>The <code>SDKConfigID</code> scalar type represents an identifier for an object of type SDKConfig.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1250,7 +1410,17 @@
 			"t": "C",
 			"n": "Dagger\\ScalarTypeDefId",
 			"p": "Dagger/ScalarTypeDefId.html",
-			"d": "<p>The <code>ScalarTypeDefID</code> scalar type represents an identifier for an object of type ScalarTypeDef.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\Schema",
+			"p": "Dagger/Schema.html",
+			"d": "<p>A GraphQL introspection schema that can be inspected and merged.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1270,7 +1440,7 @@
 			"t": "C",
 			"n": "Dagger\\SearchResultId",
 			"p": "Dagger/SearchResultId.html",
-			"d": "<p>The <code>SearchResultID</code> scalar type represents an identifier for an object of type SearchResult.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1290,7 +1460,7 @@
 			"t": "C",
 			"n": "Dagger\\SearchSubmatchId",
 			"p": "Dagger/SearchSubmatchId.html",
-			"d": "<p>The <code>SearchSubmatchID</code> scalar type represents an identifier for an object of type SearchSubmatch.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1310,7 +1480,7 @@
 			"t": "C",
 			"n": "Dagger\\SecretId",
 			"p": "Dagger/SecretId.html",
-			"d": "<p>The <code>SecretID</code> scalar type represents an identifier for an object of type Secret.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1330,7 +1500,7 @@
 			"t": "C",
 			"n": "Dagger\\ServiceId",
 			"p": "Dagger/ServiceId.html",
-			"d": "<p>The <code>ServiceID</code> scalar type represents an identifier for an object of type Service.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1350,7 +1520,7 @@
 			"t": "C",
 			"n": "Dagger\\SocketId",
 			"p": "Dagger/SocketId.html",
-			"d": "<p>The <code>SocketID</code> scalar type represents an identifier for an object of type Socket.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1370,7 +1540,7 @@
 			"t": "C",
 			"n": "Dagger\\SourceMapId",
 			"p": "Dagger/SourceMapId.html",
-			"d": "<p>The <code>SourceMapID</code> scalar type represents an identifier for an object of type SourceMap.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1390,7 +1560,37 @@
 			"t": "C",
 			"n": "Dagger\\StatId",
 			"p": "Dagger/StatId.html",
-			"d": "<p>The <code>StatID</code> scalar type represents an identifier for an object of type Stat.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\Syncer",
+			"p": "Dagger/Syncer.html",
+			"d": "<p>An object that can be force-evaluated.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\SyncerClient",
+			"p": "Dagger/SyncerClient.html",
+			"d": "<p>Query-builder client for the Syncer interface.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\SyncerId",
+			"p": "Dagger/SyncerId.html",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1410,7 +1610,7 @@
 			"t": "C",
 			"n": "Dagger\\TerminalId",
 			"p": "Dagger/TerminalId.html",
-			"d": "<p>The <code>TerminalID</code> scalar type represents an identifier for an object of type Terminal.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1430,7 +1630,7 @@
 			"t": "C",
 			"n": "Dagger\\TypeDefId",
 			"p": "Dagger/TypeDefId.html",
-			"d": "<p>The <code>TypeDefID</code> scalar type represents an identifier for an object of type TypeDef.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1460,7 +1660,7 @@
 			"t": "C",
 			"n": "Dagger\\UpGroupId",
 			"p": "Dagger/UpGroupId.html",
-			"d": "<p>The <code>UpGroupID</code> scalar type represents an identifier for an object of type UpGroup.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1470,7 +1670,7 @@
 			"t": "C",
 			"n": "Dagger\\UpId",
 			"p": "Dagger/UpId.html",
-			"d": "<p>The <code>UpID</code> scalar type represents an identifier for an object of type Up.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1480,7 +1680,27 @@
 			"t": "C",
 			"n": "Dagger\\Workspace",
 			"p": "Dagger/Workspace.html",
-			"d": "<p>A Dagger workspace detected from the current working directory.</p>",
+			"d": "<p>A Dagger workspace detected from the current working directory or constructed from a Directory.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\WorkspaceGit",
+			"p": "Dagger/WorkspaceGit.html",
+			"d": "<p>Local git state for a workspace.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\WorkspaceGitId",
+			"p": "Dagger/WorkspaceGitId.html",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1490,7 +1710,87 @@
 			"t": "C",
 			"n": "Dagger\\WorkspaceId",
 			"p": "Dagger/WorkspaceId.html",
-			"d": "<p>The <code>WorkspaceID</code> scalar type represents an identifier for an object of type Workspace.</p>",
+			"d": "<p>A unique identifier for an object.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\WorkspaceMigration",
+			"p": "Dagger/WorkspaceMigration.html",
+			"d": "<p>A planned workspace migration.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\WorkspaceMigrationId",
+			"p": "Dagger/WorkspaceMigrationId.html",
+			"d": "<p>A unique identifier for an object.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\WorkspaceMigrationStep",
+			"p": "Dagger/WorkspaceMigrationStep.html",
+			"d": "<p>A single logical part of a workspace migration.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\WorkspaceMigrationStepId",
+			"p": "Dagger/WorkspaceMigrationStepId.html",
+			"d": "<p>A unique identifier for an object.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\WorkspaceModule",
+			"p": "Dagger/WorkspaceModule.html",
+			"d": "<p>A module entry in the workspace configuration.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\WorkspaceModuleId",
+			"p": "Dagger/WorkspaceModuleId.html",
+			"d": "<p>A unique identifier for an object.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\WorkspaceModuleSetting",
+			"p": "Dagger/WorkspaceModuleSetting.html",
+			"d": "<p>A constructor-backed module setting.</p>",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "C",
+			"n": "Dagger\\WorkspaceModuleSettingId",
+			"p": "Dagger/WorkspaceModuleSettingId.html",
+			"d": "<p>A unique identifier for an object.</p>",
 			"f": {
 				"n": "Dagger",
 				"p": "Dagger.html"
@@ -1503,6 +1803,33 @@
 			"f": {
 				"n": "Dagger\\Client",
 				"p": "Dagger/Client.html"
+			}
+		},
+		{
+			"t": "I",
+			"n": "Dagger\\Exportable",
+			"p": "Dagger/Exportable.html",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "I",
+			"n": "Dagger\\Node",
+			"p": "Dagger/Node.html",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
+			}
+		},
+		{
+			"t": "I",
+			"n": "Dagger\\Syncer",
+			"p": "Dagger/Syncer.html",
+			"f": {
+				"n": "Dagger",
+				"p": "Dagger.html"
 			}
 		},
 		{
@@ -1639,6 +1966,24 @@
 		},
 		{
 			"t": "M",
+			"n": "Dagger\\Binding::asCurrentModuleAsSDK",
+			"p": "Dagger/Binding.html#method_asCurrentModuleAsSDK",
+			"d": "<p>Retrieve the binding value, as type CurrentModuleAsSDK</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Binding::asCurrentModuleAsSDKClient",
+			"p": "Dagger/Binding.html#method_asCurrentModuleAsSDKClient",
+			"d": "<p>Retrieve the binding value, as type CurrentModuleAsSDKClient</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Binding::asCurrentModuleAsSDKModule",
+			"p": "Dagger/Binding.html#method_asCurrentModuleAsSDKModule",
+			"d": "<p>Retrieve the binding value, as type CurrentModuleAsSDKModule</p>"
+		},
+		{
+			"t": "M",
 			"n": "Dagger\\Binding::asDiffStat",
 			"p": "Dagger/Binding.html#method_asDiffStat",
 			"d": "<p>Retrieve the binding value, as type DiffStat</p>"
@@ -1693,6 +2038,12 @@
 		},
 		{
 			"t": "M",
+			"n": "Dagger\\Binding::asHTTPState",
+			"p": "Dagger/Binding.html#method_asHTTPState",
+			"d": "<p>Retrieve the binding value, as type HTTPState</p>"
+		},
+		{
+			"t": "M",
 			"n": "Dagger\\Binding::asJSONValue",
 			"p": "Dagger/Binding.html#method_asJSONValue",
 			"d": "<p>Retrieve the binding value, as type JSONValue</p>"
@@ -1720,6 +2071,12 @@
 			"n": "Dagger\\Binding::asPhpSdk",
 			"p": "Dagger/Binding.html#method_asPhpSdk",
 			"d": "<p>Retrieve the binding value, as type PhpSdk</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Binding::asSchema",
+			"p": "Dagger/Binding.html#method_asSchema",
+			"d": "<p>Retrieve the binding value, as type Schema</p>"
 		},
 		{
 			"t": "M",
@@ -1780,6 +2137,36 @@
 			"n": "Dagger\\Binding::asWorkspace",
 			"p": "Dagger/Binding.html#method_asWorkspace",
 			"d": "<p>Retrieve the binding value, as type Workspace</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Binding::asWorkspaceGit",
+			"p": "Dagger/Binding.html#method_asWorkspaceGit",
+			"d": "<p>Retrieve the binding value, as type WorkspaceGit</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Binding::asWorkspaceMigration",
+			"p": "Dagger/Binding.html#method_asWorkspaceMigration",
+			"d": "<p>Retrieve the binding value, as type WorkspaceMigration</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Binding::asWorkspaceMigrationStep",
+			"p": "Dagger/Binding.html#method_asWorkspaceMigrationStep",
+			"d": "<p>Retrieve the binding value, as type WorkspaceMigrationStep</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Binding::asWorkspaceModule",
+			"p": "Dagger/Binding.html#method_asWorkspaceModule",
+			"d": "<p>Retrieve the binding value, as type WorkspaceModule</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Binding::asWorkspaceModuleSetting",
+			"p": "Dagger/Binding.html#method_asWorkspaceModuleSetting",
+			"d": "<p>Retrieve the binding value, as type WorkspaceModuleSetting</p>"
 		},
 		{
 			"t": "M",
@@ -1936,6 +2323,12 @@
 			"n": "Dagger\\ChangesetDiffStatEntry::removedLines",
 			"p": "Dagger/ChangesetDiffStatEntry.html#method_removedLines",
 			"d": "<p>Number of removed lines for this path.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Check::checkType",
+			"p": "Dagger/Check.html#method_checkType",
+			"d": "<p>The type of check: 'check' for annotated checks, 'generate' for generate-as-checks</p>"
 		},
 		{
 			"t": "M",
@@ -2185,384 +2578,6 @@
 		},
 		{
 			"t": "M",
-			"n": "Dagger\\Client::loadAddressFromID",
-			"p": "Dagger/Client.html#method_loadAddressFromID",
-			"d": "<p>Load a Address from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadBindingFromID",
-			"p": "Dagger/Client.html#method_loadBindingFromID",
-			"d": "<p>Load a Binding from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadCacheVolumeFromID",
-			"p": "Dagger/Client.html#method_loadCacheVolumeFromID",
-			"d": "<p>Load a CacheVolume from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadChangesetFromID",
-			"p": "Dagger/Client.html#method_loadChangesetFromID",
-			"d": "<p>Load a Changeset from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadCheckFromID",
-			"p": "Dagger/Client.html#method_loadCheckFromID",
-			"d": "<p>Load a Check from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadCheckGroupFromID",
-			"p": "Dagger/Client.html#method_loadCheckGroupFromID",
-			"d": "<p>Load a CheckGroup from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadCloudFromID",
-			"p": "Dagger/Client.html#method_loadCloudFromID",
-			"d": "<p>Load a Cloud from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadContainerFromID",
-			"p": "Dagger/Client.html#method_loadContainerFromID",
-			"d": "<p>Load a Container from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadCurrentModuleFromID",
-			"p": "Dagger/Client.html#method_loadCurrentModuleFromID",
-			"d": "<p>Load a CurrentModule from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadDiffStatFromID",
-			"p": "Dagger/Client.html#method_loadDiffStatFromID",
-			"d": "<p>Load a DiffStat from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadDirectoryFromID",
-			"p": "Dagger/Client.html#method_loadDirectoryFromID",
-			"d": "<p>Load a Directory from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadEngineCacheEntryFromID",
-			"p": "Dagger/Client.html#method_loadEngineCacheEntryFromID",
-			"d": "<p>Load a EngineCacheEntry from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadEngineCacheEntrySetFromID",
-			"p": "Dagger/Client.html#method_loadEngineCacheEntrySetFromID",
-			"d": "<p>Load a EngineCacheEntrySet from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadEngineCacheFromID",
-			"p": "Dagger/Client.html#method_loadEngineCacheFromID",
-			"d": "<p>Load a EngineCache from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadEngineFromID",
-			"p": "Dagger/Client.html#method_loadEngineFromID",
-			"d": "<p>Load a Engine from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadEnumTypeDefFromID",
-			"p": "Dagger/Client.html#method_loadEnumTypeDefFromID",
-			"d": "<p>Load a EnumTypeDef from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadEnumValueTypeDefFromID",
-			"p": "Dagger/Client.html#method_loadEnumValueTypeDefFromID",
-			"d": "<p>Load a EnumValueTypeDef from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadEnvFileFromID",
-			"p": "Dagger/Client.html#method_loadEnvFileFromID",
-			"d": "<p>Load a EnvFile from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadEnvFromID",
-			"p": "Dagger/Client.html#method_loadEnvFromID",
-			"d": "<p>Load a Env from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadEnvVariableFromID",
-			"p": "Dagger/Client.html#method_loadEnvVariableFromID",
-			"d": "<p>Load a EnvVariable from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadErrorFromID",
-			"p": "Dagger/Client.html#method_loadErrorFromID",
-			"d": "<p>Load a Error from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadErrorValueFromID",
-			"p": "Dagger/Client.html#method_loadErrorValueFromID",
-			"d": "<p>Load a ErrorValue from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadFieldTypeDefFromID",
-			"p": "Dagger/Client.html#method_loadFieldTypeDefFromID",
-			"d": "<p>Load a FieldTypeDef from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadFileFromID",
-			"p": "Dagger/Client.html#method_loadFileFromID",
-			"d": "<p>Load a File from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadFunctionArgFromID",
-			"p": "Dagger/Client.html#method_loadFunctionArgFromID",
-			"d": "<p>Load a FunctionArg from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadFunctionCallArgValueFromID",
-			"p": "Dagger/Client.html#method_loadFunctionCallArgValueFromID",
-			"d": "<p>Load a FunctionCallArgValue from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadFunctionCallFromID",
-			"p": "Dagger/Client.html#method_loadFunctionCallFromID",
-			"d": "<p>Load a FunctionCall from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadFunctionFromID",
-			"p": "Dagger/Client.html#method_loadFunctionFromID",
-			"d": "<p>Load a Function from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadGeneratedCodeFromID",
-			"p": "Dagger/Client.html#method_loadGeneratedCodeFromID",
-			"d": "<p>Load a GeneratedCode from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadGeneratorFromID",
-			"p": "Dagger/Client.html#method_loadGeneratorFromID",
-			"d": "<p>Load a Generator from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadGeneratorGroupFromID",
-			"p": "Dagger/Client.html#method_loadGeneratorGroupFromID",
-			"d": "<p>Load a GeneratorGroup from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadGitRefFromID",
-			"p": "Dagger/Client.html#method_loadGitRefFromID",
-			"d": "<p>Load a GitRef from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadGitRepositoryFromID",
-			"p": "Dagger/Client.html#method_loadGitRepositoryFromID",
-			"d": "<p>Load a GitRepository from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadHealthcheckConfigFromID",
-			"p": "Dagger/Client.html#method_loadHealthcheckConfigFromID",
-			"d": "<p>Load a HealthcheckConfig from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadHostFromID",
-			"p": "Dagger/Client.html#method_loadHostFromID",
-			"d": "<p>Load a Host from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadInputTypeDefFromID",
-			"p": "Dagger/Client.html#method_loadInputTypeDefFromID",
-			"d": "<p>Load a InputTypeDef from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadInterfaceTypeDefFromID",
-			"p": "Dagger/Client.html#method_loadInterfaceTypeDefFromID",
-			"d": "<p>Load a InterfaceTypeDef from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadJSONValueFromID",
-			"p": "Dagger/Client.html#method_loadJSONValueFromID",
-			"d": "<p>Load a JSONValue from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadLLMFromID",
-			"p": "Dagger/Client.html#method_loadLLMFromID",
-			"d": "<p>Load a LLM from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadLLMTokenUsageFromID",
-			"p": "Dagger/Client.html#method_loadLLMTokenUsageFromID",
-			"d": "<p>Load a LLMTokenUsage from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadLabelFromID",
-			"p": "Dagger/Client.html#method_loadLabelFromID",
-			"d": "<p>Load a Label from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadListTypeDefFromID",
-			"p": "Dagger/Client.html#method_loadListTypeDefFromID",
-			"d": "<p>Load a ListTypeDef from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadModuleConfigClientFromID",
-			"p": "Dagger/Client.html#method_loadModuleConfigClientFromID",
-			"d": "<p>Load a ModuleConfigClient from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadModuleFromID",
-			"p": "Dagger/Client.html#method_loadModuleFromID",
-			"d": "<p>Load a Module from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadModuleSourceFromID",
-			"p": "Dagger/Client.html#method_loadModuleSourceFromID",
-			"d": "<p>Load a ModuleSource from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadObjectTypeDefFromID",
-			"p": "Dagger/Client.html#method_loadObjectTypeDefFromID",
-			"d": "<p>Load a ObjectTypeDef from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadPhpSdkFromID",
-			"p": "Dagger/Client.html#method_loadPhpSdkFromID",
-			"d": "<p>Load a PhpSdk from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadPortFromID",
-			"p": "Dagger/Client.html#method_loadPortFromID",
-			"d": "<p>Load a Port from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadQueryFromID",
-			"p": "Dagger/Client.html#method_loadQueryFromID",
-			"d": "<p>Load a Query from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadSDKConfigFromID",
-			"p": "Dagger/Client.html#method_loadSDKConfigFromID",
-			"d": "<p>Load a SDKConfig from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadScalarTypeDefFromID",
-			"p": "Dagger/Client.html#method_loadScalarTypeDefFromID",
-			"d": "<p>Load a ScalarTypeDef from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadSearchResultFromID",
-			"p": "Dagger/Client.html#method_loadSearchResultFromID",
-			"d": "<p>Load a SearchResult from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadSearchSubmatchFromID",
-			"p": "Dagger/Client.html#method_loadSearchSubmatchFromID",
-			"d": "<p>Load a SearchSubmatch from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadSecretFromID",
-			"p": "Dagger/Client.html#method_loadSecretFromID",
-			"d": "<p>Load a Secret from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadServiceFromID",
-			"p": "Dagger/Client.html#method_loadServiceFromID",
-			"d": "<p>Load a Service from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadSocketFromID",
-			"p": "Dagger/Client.html#method_loadSocketFromID",
-			"d": "<p>Load a Socket from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadSourceMapFromID",
-			"p": "Dagger/Client.html#method_loadSourceMapFromID",
-			"d": "<p>Load a SourceMap from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadStatFromID",
-			"p": "Dagger/Client.html#method_loadStatFromID",
-			"d": "<p>Load a Stat from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadTerminalFromID",
-			"p": "Dagger/Client.html#method_loadTerminalFromID",
-			"d": "<p>Load a Terminal from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadTypeDefFromID",
-			"p": "Dagger/Client.html#method_loadTypeDefFromID",
-			"d": "<p>Load a TypeDef from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadUpFromID",
-			"p": "Dagger/Client.html#method_loadUpFromID",
-			"d": "<p>Load a Up from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadUpGroupFromID",
-			"p": "Dagger/Client.html#method_loadUpGroupFromID",
-			"d": "<p>Load a UpGroup from its ID.</p>"
-		},
-		{
-			"t": "M",
-			"n": "Dagger\\Client::loadWorkspaceFromID",
-			"p": "Dagger/Client.html#method_loadWorkspaceFromID",
-			"d": "<p>Load a Workspace from its ID.</p>"
-		},
-		{
-			"t": "M",
 			"n": "Dagger\\Client::module",
 			"p": "Dagger/Client.html#method_module",
 			"d": "<p>Create a new module.</p>"
@@ -2578,6 +2593,18 @@
 			"n": "Dagger\\Client::moduleSource",
 			"p": "Dagger/Client.html#method_moduleSource",
 			"d": "<p>Create a new module source instance from a source ref string</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Client::node",
+			"p": "Dagger/Client.html#method_node",
+			"d": "<p>Load any object by its ID.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Client::schema",
+			"p": "Dagger/Client.html#method_schema",
+			"d": "<p>Load a GraphQL introspection schema for merging.</p>"
 		},
 		{
 			"t": "M",
@@ -2623,6 +2650,12 @@
 		},
 		{
 			"t": "M",
+			"n": "Dagger\\ClientFilesyncMirror::id",
+			"p": "Dagger/ClientFilesyncMirror.html#method_id",
+			"d": "<p>A unique identifier for this ClientFilesyncMirror.</p>"
+		},
+		{
+			"t": "M",
 			"n": "Dagger\\Client\\AbstractClient::__construct",
 			"p": "Dagger/Client/AbstractClient.html#method___construct",
 			"d": null
@@ -2638,6 +2671,12 @@
 			"n": "Dagger\\Client\\AbstractClient::queryLeaf",
 			"p": "Dagger/Client/AbstractClient.html#method_queryLeaf",
 			"d": null
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Client\\AbstractClient::loadObjectFromId",
+			"p": "Dagger/Client/AbstractClient.html#method_loadObjectFromId",
+			"d": "<p>Load an object by its ID using node(id:) with an inline fragment.</p>"
 		},
 		{
 			"t": "M",
@@ -2787,13 +2826,13 @@
 			"t": "M",
 			"n": "Dagger\\Container::envVariable",
 			"p": "Dagger/Container.html#method_envVariable",
-			"d": "<p>Retrieves the value of the specified environment variable.</p>"
+			"d": "<p>Retrieves the value of the specified persistent environment variable.</p>"
 		},
 		{
 			"t": "M",
 			"n": "Dagger\\Container::envVariables",
 			"p": "Dagger/Container.html#method_envVariables",
-			"d": "<p>Retrieves the list of environment variables passed to commands.</p>"
+			"d": "<p>Retrieves the list of persistent environment variables configured on the container.</p>"
 		},
 		{
 			"t": "M",
@@ -3109,6 +3148,12 @@
 		},
 		{
 			"t": "M",
+			"n": "Dagger\\Container::withVolatileVariable",
+			"p": "Dagger/Container.html#method_withVolatileVariable",
+			"d": "<p>Set a new non-secret environment variable for future execs without invalidating exec cache when only its value changes.</p>"
+		},
+		{
+			"t": "M",
 			"n": "Dagger\\Container::withWorkdir",
 			"p": "Dagger/Container.html#method_withWorkdir",
 			"d": "<p>Change the container's working directory. Like WORKDIR in Dockerfile.</p>"
@@ -3205,6 +3250,12 @@
 		},
 		{
 			"t": "M",
+			"n": "Dagger\\Container::withoutVolatileVariable",
+			"p": "Dagger/Container.html#method_withoutVolatileVariable",
+			"d": "<p>Retrieves this container minus the given volatile environment variable.</p>"
+		},
+		{
+			"t": "M",
 			"n": "Dagger\\Container::withoutWorkdir",
 			"p": "Dagger/Container.html#method_withoutWorkdir",
 			"d": "<p>Unset the container's working directory.</p>"
@@ -3214,6 +3265,12 @@
 			"n": "Dagger\\Container::workdir",
 			"p": "Dagger/Container.html#method_workdir",
 			"d": "<p>Retrieves the working directory for all commands.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\CurrentModule::asSDK",
+			"p": "Dagger/CurrentModule.html#method_asSDK",
+			"d": "<p>Treat the currently executing module as an SDK installed in the active workspace, exposing the modules and clients it manages.</p>"
 		},
 		{
 			"t": "M",
@@ -3262,6 +3319,66 @@
 			"n": "Dagger\\CurrentModule::workdirFile",
 			"p": "Dagger/CurrentModule.html#method_workdirFile",
 			"d": "<p>Load a file from the module's scratch working directory, including any changes that may have been made to it during module function execution.Load a file from the module's scratch working directory, including any changes that may have been made to it during module function execution.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\CurrentModuleAsSDK::clients",
+			"p": "Dagger/CurrentModuleAsSDK.html#method_clients",
+			"d": "<p>The generated clients this SDK produces in the workspace.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\CurrentModuleAsSDK::id",
+			"p": "Dagger/CurrentModuleAsSDK.html#method_id",
+			"d": "<p>A unique identifier for this CurrentModuleAsSDK.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\CurrentModuleAsSDK::modules",
+			"p": "Dagger/CurrentModuleAsSDK.html#method_modules",
+			"d": "<p>The workspace-local modules this SDK authors and manages.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\CurrentModuleAsSDK::name",
+			"p": "Dagger/CurrentModuleAsSDK.html#method_name",
+			"d": "<p>The user-facing name of this SDK in the workspace.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\CurrentModuleAsSDKClient::id",
+			"p": "Dagger/CurrentModuleAsSDKClient.html#method_id",
+			"d": "<p>A unique identifier for this CurrentModuleAsSDKClient.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\CurrentModuleAsSDKClient::module",
+			"p": "Dagger/CurrentModuleAsSDKClient.html#method_module",
+			"d": "<p>The module the client is bound to (workspace-relative path or canonical ref).</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\CurrentModuleAsSDKClient::path",
+			"p": "Dagger/CurrentModuleAsSDKClient.html#method_path",
+			"d": "<p>Workspace-root-relative path of the generated client.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\CurrentModuleAsSDKClient::pin",
+			"p": "Dagger/CurrentModuleAsSDKClient.html#method_pin",
+			"d": "<p>The pinned version of the bound module, if any.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\CurrentModuleAsSDKModule::id",
+			"p": "Dagger/CurrentModuleAsSDKModule.html#method_id",
+			"d": "<p>A unique identifier for this CurrentModuleAsSDKModule.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\CurrentModuleAsSDKModule::path",
+			"p": "Dagger/CurrentModuleAsSDKModule.html#method_path",
+			"d": "<p>Workspace-root-relative path to the managed module.</p>"
 		},
 		{
 			"t": "M",
@@ -3328,6 +3445,12 @@
 			"n": "Dagger\\Directory::asModuleSource",
 			"p": "Dagger/Directory.html#method_asModuleSource",
 			"d": "<p>Load the directory as a Dagger module source</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Directory::asWorkspace",
+			"p": "Dagger/Directory.html#method_asWorkspace",
+			"d": "<p>Creates a synthetic workspace from this directory.</p>"
 		},
 		{
 			"t": "M",
@@ -3543,7 +3666,7 @@
 			"t": "M",
 			"n": "Dagger\\Engine::localCache",
 			"p": "Dagger/Engine.html#method_localCache",
-			"d": "<p>The local (on-disk) cache for the Dagger engine</p>"
+			"d": "<p>The local engine cache state tracked by dagql</p>"
 		},
 		{
 			"t": "M",
@@ -3607,6 +3730,12 @@
 		},
 		{
 			"t": "M",
+			"n": "Dagger\\EngineCacheEntry::dagqlCall",
+			"p": "Dagger/EngineCacheEntry.html#method_dagqlCall",
+			"d": "<p>The DagQL call that produced this cache entry.</p>"
+		},
+		{
+			"t": "M",
 			"n": "Dagger\\EngineCacheEntry::description",
 			"p": "Dagger/EngineCacheEntry.html#method_description",
 			"d": "<p>The description of the cache entry.</p>"
@@ -3634,6 +3763,12 @@
 			"n": "Dagger\\EngineCacheEntry::recordType",
 			"p": "Dagger/EngineCacheEntry.html#method_recordType",
 			"d": "<p>The type of the cache record (e.g. regular, internal, frontend, source.local, source.git.checkout, exec.cachemount).</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\EngineCacheEntry::recordTypes",
+			"p": "Dagger/EngineCacheEntry.html#method_recordTypes",
+			"d": "<p>The storage record types represented by this cache entry.</p>"
 		},
 		{
 			"t": "M",
@@ -3699,7 +3834,7 @@
 			"t": "M",
 			"n": "Dagger\\EnumTypeDef::values",
 			"p": "Dagger/EnumTypeDef.html#method_values",
-			"d": null
+			"d": "<p>The members of the enum.</p>"
 		},
 		{
 			"t": "M",
@@ -3877,6 +4012,42 @@
 		},
 		{
 			"t": "M",
+			"n": "Dagger\\Env::withCurrentModuleAsSDKClientInput",
+			"p": "Dagger/Env.html#method_withCurrentModuleAsSDKClientInput",
+			"d": "<p>Create or update a binding of type CurrentModuleAsSDKClient in the environment</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Env::withCurrentModuleAsSDKClientOutput",
+			"p": "Dagger/Env.html#method_withCurrentModuleAsSDKClientOutput",
+			"d": "<p>Declare a desired CurrentModuleAsSDKClient output to be assigned in the environment</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Env::withCurrentModuleAsSDKInput",
+			"p": "Dagger/Env.html#method_withCurrentModuleAsSDKInput",
+			"d": "<p>Create or update a binding of type CurrentModuleAsSDK in the environment</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Env::withCurrentModuleAsSDKModuleInput",
+			"p": "Dagger/Env.html#method_withCurrentModuleAsSDKModuleInput",
+			"d": "<p>Create or update a binding of type CurrentModuleAsSDKModule in the environment</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Env::withCurrentModuleAsSDKModuleOutput",
+			"p": "Dagger/Env.html#method_withCurrentModuleAsSDKModuleOutput",
+			"d": "<p>Declare a desired CurrentModuleAsSDKModule output to be assigned in the environment</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Env::withCurrentModuleAsSDKOutput",
+			"p": "Dagger/Env.html#method_withCurrentModuleAsSDKOutput",
+			"d": "<p>Declare a desired CurrentModuleAsSDK output to be assigned in the environment</p>"
+		},
+		{
+			"t": "M",
 			"n": "Dagger\\Env::withDiffStatInput",
 			"p": "Dagger/Env.html#method_withDiffStatInput",
 			"d": "<p>Create or update a binding of type DiffStat in the environment</p>"
@@ -3985,6 +4156,18 @@
 		},
 		{
 			"t": "M",
+			"n": "Dagger\\Env::withHTTPStateInput",
+			"p": "Dagger/Env.html#method_withHTTPStateInput",
+			"d": "<p>Create or update a binding of type HTTPState in the environment</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Env::withHTTPStateOutput",
+			"p": "Dagger/Env.html#method_withHTTPStateOutput",
+			"d": "<p>Declare a desired HTTPState output to be assigned in the environment</p>"
+		},
+		{
+			"t": "M",
 			"n": "Dagger\\Env::withJSONValueInput",
 			"p": "Dagger/Env.html#method_withJSONValueInput",
 			"d": "<p>Create or update a binding of type JSONValue in the environment</p>"
@@ -4054,6 +4237,18 @@
 			"n": "Dagger\\Env::withPhpSdkOutput",
 			"p": "Dagger/Env.html#method_withPhpSdkOutput",
 			"d": "<p>Declare a desired PhpSdk output to be assigned in the environment</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Env::withSchemaInput",
+			"p": "Dagger/Env.html#method_withSchemaInput",
+			"d": "<p>Create or update a binding of type Schema in the environment</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Env::withSchemaOutput",
+			"p": "Dagger/Env.html#method_withSchemaOutput",
+			"d": "<p>Declare a desired Schema output to be assigned in the environment</p>"
 		},
 		{
 			"t": "M",
@@ -4171,9 +4366,69 @@
 		},
 		{
 			"t": "M",
+			"n": "Dagger\\Env::withWorkspaceGitInput",
+			"p": "Dagger/Env.html#method_withWorkspaceGitInput",
+			"d": "<p>Create or update a binding of type WorkspaceGit in the environment</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Env::withWorkspaceGitOutput",
+			"p": "Dagger/Env.html#method_withWorkspaceGitOutput",
+			"d": "<p>Declare a desired WorkspaceGit output to be assigned in the environment</p>"
+		},
+		{
+			"t": "M",
 			"n": "Dagger\\Env::withWorkspaceInput",
 			"p": "Dagger/Env.html#method_withWorkspaceInput",
 			"d": "<p>Create or update a binding of type Workspace in the environment</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Env::withWorkspaceMigrationInput",
+			"p": "Dagger/Env.html#method_withWorkspaceMigrationInput",
+			"d": "<p>Create or update a binding of type WorkspaceMigration in the environment</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Env::withWorkspaceMigrationOutput",
+			"p": "Dagger/Env.html#method_withWorkspaceMigrationOutput",
+			"d": "<p>Declare a desired WorkspaceMigration output to be assigned in the environment</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Env::withWorkspaceMigrationStepInput",
+			"p": "Dagger/Env.html#method_withWorkspaceMigrationStepInput",
+			"d": "<p>Create or update a binding of type WorkspaceMigrationStep in the environment</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Env::withWorkspaceMigrationStepOutput",
+			"p": "Dagger/Env.html#method_withWorkspaceMigrationStepOutput",
+			"d": "<p>Declare a desired WorkspaceMigrationStep output to be assigned in the environment</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Env::withWorkspaceModuleInput",
+			"p": "Dagger/Env.html#method_withWorkspaceModuleInput",
+			"d": "<p>Create or update a binding of type WorkspaceModule in the environment</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Env::withWorkspaceModuleOutput",
+			"p": "Dagger/Env.html#method_withWorkspaceModuleOutput",
+			"d": "<p>Declare a desired WorkspaceModule output to be assigned in the environment</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Env::withWorkspaceModuleSettingInput",
+			"p": "Dagger/Env.html#method_withWorkspaceModuleSettingInput",
+			"d": "<p>Create or update a binding of type WorkspaceModuleSetting in the environment</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Env::withWorkspaceModuleSettingOutput",
+			"p": "Dagger/Env.html#method_withWorkspaceModuleSettingOutput",
+			"d": "<p>Declare a desired WorkspaceModuleSetting output to be assigned in the environment</p>"
 		},
 		{
 			"t": "M",
@@ -4300,6 +4555,30 @@
 			"n": "Dagger\\ErrorValue::value",
 			"p": "Dagger/ErrorValue.html#method_value",
 			"d": "<p>The value.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Exportable::export",
+			"p": "Dagger/Exportable.html#method_export",
+			"d": null
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Exportable::id",
+			"p": "Dagger/Exportable.html#method_id",
+			"d": null
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\ExportableClient::export",
+			"p": "Dagger/ExportableClient.html#method_export",
+			"d": null
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\ExportableClient::id",
+			"p": "Dagger/ExportableClient.html#method_id",
+			"d": null
 		},
 		{
 			"t": "M",
@@ -4765,6 +5044,12 @@
 		},
 		{
 			"t": "M",
+			"n": "Dagger\\GitRef::asWorkspace",
+			"p": "Dagger/GitRef.html#method_asWorkspace",
+			"d": "<p>Creates a synthetic workspace from this git ref.</p>"
+		},
+		{
+			"t": "M",
 			"n": "Dagger\\GitRef::commit",
 			"p": "Dagger/GitRef.html#method_commit",
 			"d": "<p>The resolved commit id at this ref.</p>"
@@ -4792,6 +5077,12 @@
 			"n": "Dagger\\GitRef::tree",
 			"p": "Dagger/GitRef.html#method_tree",
 			"d": "<p>The filesystem tree at this ref.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\GitRepository::asWorkspace",
+			"p": "Dagger/GitRepository.html#method_asWorkspace",
+			"d": "<p>Creates a synthetic workspace from this git repository.</p>"
 		},
 		{
 			"t": "M",
@@ -4858,6 +5149,12 @@
 			"n": "Dagger\\GitRepository::url",
 			"p": "Dagger/GitRepository.html#method_url",
 			"d": "<p>The URL of the git repository.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\HTTPState::id",
+			"p": "Dagger/HTTPState.html#method_id",
+			"d": "<p>A unique identifier for this HTTPState.</p>"
 		},
 		{
 			"t": "M",
@@ -5511,7 +5808,7 @@
 			"t": "M",
 			"n": "Dagger\\ModuleSource::configExists",
 			"p": "Dagger/ModuleSource.html#method_configExists",
-			"d": "<p>Whether an existing dagger.json for the module was found.</p>"
+			"d": "<p>Whether an existing module config file was found.</p>"
 		},
 		{
 			"t": "M",
@@ -5601,7 +5898,7 @@
 			"t": "M",
 			"n": "Dagger\\ModuleSource::moduleOriginalName",
 			"p": "Dagger/ModuleSource.html#method_moduleOriginalName",
-			"d": "<p>The original name of the module as read from the module's dagger.json (or set for the first time with the withName API).</p>"
+			"d": "<p>The original name of the module as read from the module config file (or set for the first time with the withName API).</p>"
 		},
 		{
 			"t": "M",
@@ -5631,7 +5928,7 @@
 			"t": "M",
 			"n": "Dagger\\ModuleSource::sourceRootSubpath",
 			"p": "Dagger/ModuleSource.html#method_sourceRootSubpath",
-			"d": "<p>The path, relative to the context directory, that contains the module's dagger.json.</p>"
+			"d": "<p>The path, relative to the context directory, that contains the module config.</p>"
 		},
 		{
 			"t": "M",
@@ -5650,6 +5947,12 @@
 			"n": "Dagger\\ModuleSource::toolchains",
 			"p": "Dagger/ModuleSource.html#method_toolchains",
 			"d": "<p>The toolchains referenced by the module source.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\ModuleSource::updatedConfigDirectory",
+			"p": "Dagger/ModuleSource.html#method_updatedConfigDirectory",
+			"d": "<p>The module's dagger.json with any in-memory edits from with* APIs applied, as a diff relative to the source's context directory.</p>"
 		},
 		{
 			"t": "M",
@@ -5779,9 +6082,21 @@
 		},
 		{
 			"t": "M",
+			"n": "Dagger\\Node::id",
+			"p": "Dagger/Node.html#method_id",
+			"d": null
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\NodeClient::id",
+			"p": "Dagger/NodeClient.html#method_id",
+			"d": null
+		},
+		{
+			"t": "M",
 			"n": "Dagger\\ObjectTypeDef::constructor",
 			"p": "Dagger/ObjectTypeDef.html#method_constructor",
-			"d": "<p>The function used to construct new instances of this object, if any</p>"
+			"d": "<p>The function used to construct new instances of this object, if any.</p>"
 		},
 		{
 			"t": "M",
@@ -5905,6 +6220,12 @@
 		},
 		{
 			"t": "M",
+			"n": "Dagger\\RemoteGitMirror::id",
+			"p": "Dagger/RemoteGitMirror.html#method_id",
+			"d": "<p>A unique identifier for this RemoteGitMirror.</p>"
+		},
+		{
+			"t": "M",
 			"n": "Dagger\\SDKConfig::debug",
 			"p": "Dagger/SDKConfig.html#method_debug",
 			"d": "<p>Whether to start the SDK runtime in debug mode with an interactive terminal.</p>"
@@ -5944,6 +6265,24 @@
 			"n": "Dagger\\ScalarTypeDef::sourceModuleName",
 			"p": "Dagger/ScalarTypeDef.html#method_sourceModuleName",
 			"d": "<p>If this ScalarTypeDef is associated with a Module, the name of the module. Unset otherwise.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Schema::contents",
+			"p": "Dagger/Schema.html#method_contents",
+			"d": "<p>Serialize the schema back to introspection JSON.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Schema::id",
+			"p": "Dagger/Schema.html#method_id",
+			"d": "<p>A unique identifier for this Schema.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Schema::merge",
+			"p": "Dagger/Schema.html#method_merge",
+			"d": "<p>Merge a module's introspection-shaped type definitions into the schema, returning the combined schema.</p>"
 		},
 		{
 			"t": "M",
@@ -6163,6 +6502,30 @@
 		},
 		{
 			"t": "M",
+			"n": "Dagger\\Syncer::id",
+			"p": "Dagger/Syncer.html#method_id",
+			"d": null
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Syncer::sync",
+			"p": "Dagger/Syncer.html#method_sync",
+			"d": null
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\SyncerClient::id",
+			"p": "Dagger/SyncerClient.html#method_id",
+			"d": null
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\SyncerClient::sync",
+			"p": "Dagger/SyncerClient.html#method_sync",
+			"d": null
+		},
+		{
+			"t": "M",
 			"n": "Dagger\\Terminal::id",
 			"p": "Dagger/Terminal.html#method_id",
 			"d": "<p>A unique identifier for this Terminal.</p>"
@@ -6220,6 +6583,12 @@
 			"n": "Dagger\\TypeDef::kind",
 			"p": "Dagger/TypeDef.html#method_kind",
 			"d": "<p>The kind of type this is (e.g. primitive, list, object).</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\TypeDef::name",
+			"p": "Dagger/TypeDef.html#method_name",
+			"d": "<p>The canonical non-optional name of the type.</p>"
 		},
 		{
 			"t": "M",
@@ -6357,7 +6726,13 @@
 			"t": "M",
 			"n": "Dagger\\Workspace::address",
 			"p": "Dagger/Workspace.html#method_address",
-			"d": "<p>Canonical Dagger address of the workspace directory.</p>"
+			"d": "<p>Canonical Dagger address of the workspace location, or an opaque identity for synthetic workspaces.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Workspace::changes",
+			"p": "Dagger/Workspace.html#method_changes",
+			"d": "<p>Return the changes from another workspace to this workspace.</p>"
 		},
 		{
 			"t": "M",
@@ -6367,21 +6742,63 @@
 		},
 		{
 			"t": "M",
-			"n": "Dagger\\Workspace::clientId",
-			"p": "Dagger/Workspace.html#method_clientId",
-			"d": "<p>The client ID that owns this workspace's host filesystem.</p>"
+			"n": "Dagger\\Workspace::clientGenerate",
+			"p": "Dagger/Workspace.html#method_clientGenerate",
+			"d": "<p>Regenerate all generated API clients registered in workspace config and return the resulting Changeset.</p>"
 		},
 		{
 			"t": "M",
-			"n": "Dagger\\Workspace::configPath",
-			"p": "Dagger/Workspace.html#method_configPath",
-			"d": "<p>Path to config.toml relative to the workspace boundary (empty if not initialized).</p>"
+			"n": "Dagger\\Workspace::clientInit",
+			"p": "Dagger/Workspace.html#method_clientInit",
+			"d": "<p>Plan the workspace changes for initializing a generated API client: generated client files at <code>path</code> plus a [[modules.<sdk-name>.as-sdk.clients]] entry in dagger.toml. Returns the resulting Changeset for the caller to preview and apply.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Workspace::configFile",
+			"p": "Dagger/Workspace.html#method_configFile",
+			"d": "<p>Selected native workspace config file relative to the workspace root, if any.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Workspace::configRead",
+			"p": "Dagger/Workspace.html#method_configRead",
+			"d": "<p>Read a configuration value from dagger.toml.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Workspace::configWrite",
+			"p": "Dagger/Workspace.html#method_configWrite",
+			"d": "<p>Write a configuration value to dagger.toml.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Workspace::cwd",
+			"p": "Dagger/Workspace.html#method_cwd",
+			"d": "<p>Current location within the workspace root.</p>"
 		},
 		{
 			"t": "M",
 			"n": "Dagger\\Workspace::directory",
 			"p": "Dagger/Workspace.html#method_directory",
 			"d": "<p>Returns a Directory from the workspace.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Workspace::envCreate",
+			"p": "Dagger/Workspace.html#method_envCreate",
+			"d": "<p>Create a named workspace environment if it does not already exist.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Workspace::envList",
+			"p": "Dagger/Workspace.html#method_envList",
+			"d": "<p>List named environments defined in the workspace configuration.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Workspace::envRemove",
+			"p": "Dagger/Workspace.html#method_envRemove",
+			"d": "<p>Remove a named workspace environment.</p>"
 		},
 		{
 			"t": "M",
@@ -6403,9 +6820,9 @@
 		},
 		{
 			"t": "M",
-			"n": "Dagger\\Workspace::hasConfig",
-			"p": "Dagger/Workspace.html#method_hasConfig",
-			"d": "<p>Whether a config.toml file exists in the workspace.</p>"
+			"n": "Dagger\\Workspace::git",
+			"p": "Dagger/Workspace.html#method_git",
+			"d": "<p>Git state for this workspace. Errors if the workspace is not in a git repository.</p>"
 		},
 		{
 			"t": "M",
@@ -6415,15 +6832,33 @@
 		},
 		{
 			"t": "M",
-			"n": "Dagger\\Workspace::initialized",
-			"p": "Dagger/Workspace.html#method_initialized",
-			"d": "<p>Whether .dagger/config.toml exists.</p>"
+			"n": "Dagger\\Workspace::init",
+			"p": "Dagger/Workspace.html#method_init",
+			"d": "<p>Initialize workspace config, creating dagger.toml.</p>"
 		},
 		{
 			"t": "M",
-			"n": "Dagger\\Workspace::path",
-			"p": "Dagger/Workspace.html#method_path",
-			"d": "<p>Workspace directory path relative to the workspace boundary.</p>"
+			"n": "Dagger\\Workspace::install",
+			"p": "Dagger/Workspace.html#method_install",
+			"d": "<p>Install a module into the workspace, writing dagger.toml to the host.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Workspace::migrate",
+			"p": "Dagger/Workspace.html#method_migrate",
+			"d": "<p>Plan the explicit migration needed for the current workspace.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Workspace::moduleInit",
+			"p": "Dagger/Workspace.html#method_moduleInit",
+			"d": "<p>Plan the workspace changes for initializing a new module: dagger-module.toml + SDK codegen output at <code>path</code>, the authoring entry under [[modules.<sdk>.as-sdk.modules]], and (when path defaults) [modules.<name>]. The SDK must already be installed as an SDK. Returns the resulting Changeset for the caller to preview and apply.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Workspace::moduleList",
+			"p": "Dagger/Workspace.html#method_moduleList",
+			"d": "<p>List modules defined in the workspace configuration.</p>"
 		},
 		{
 			"t": "M",
@@ -6433,8 +6868,188 @@
 		},
 		{
 			"t": "M",
+			"n": "Dagger\\Workspace::uninstall",
+			"p": "Dagger/Workspace.html#method_uninstall",
+			"d": "<p>Uninstall a module from the workspace, writing dagger.toml to the host.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Workspace::update",
+			"p": "Dagger/Workspace.html#method_update",
+			"d": "<p>Refresh workspace-managed state and return the resulting changeset.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Workspace::withChanges",
+			"p": "Dagger/Workspace.html#method_withChanges",
+			"d": "<p>Return this workspace with a changeset applied, without mutating the source.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Workspace::withNewDirectory",
+			"p": "Dagger/Workspace.html#method_withNewDirectory",
+			"d": "<p>Return this workspace with a directory added, without mutating the source.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Workspace::withNewFile",
+			"p": "Dagger/Workspace.html#method_withNewFile",
+			"d": "<p>Return this workspace with a new or replaced file, without mutating the source.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceGit::head",
+			"p": "Dagger/WorkspaceGit.html#method_head",
+			"d": "<p>The checked-out HEAD of this workspace.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceGit::id",
+			"p": "Dagger/WorkspaceGit.html#method_id",
+			"d": "<p>A unique identifier for this WorkspaceGit.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceGit::uncommitted",
+			"p": "Dagger/WorkspaceGit.html#method_uncommitted",
+			"d": "<p>Uncommitted changes in this workspace, using the same rules as GitRepository.uncommitted.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceMigration::changes",
+			"p": "Dagger/WorkspaceMigration.html#method_changes",
+			"d": "<p>Filesystem changes for the full migration plan.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceMigration::id",
+			"p": "Dagger/WorkspaceMigration.html#method_id",
+			"d": "<p>A unique identifier for this WorkspaceMigration.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceMigration::steps",
+			"p": "Dagger/WorkspaceMigration.html#method_steps",
+			"d": "<p>Logical migration steps, each identified by a stable code.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceMigrationStep::changes",
+			"p": "Dagger/WorkspaceMigrationStep.html#method_changes",
+			"d": "<p>Filesystem changes for this step.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceMigrationStep::code",
+			"p": "Dagger/WorkspaceMigrationStep.html#method_code",
+			"d": "<p>Stable code identifying this logical migration step.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceMigrationStep::description",
+			"p": "Dagger/WorkspaceMigrationStep.html#method_description",
+			"d": "<p>Generic summary of this step's purpose and impact.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceMigrationStep::id",
+			"p": "Dagger/WorkspaceMigrationStep.html#method_id",
+			"d": "<p>A unique identifier for this WorkspaceMigrationStep.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceMigrationStep::warnings",
+			"p": "Dagger/WorkspaceMigrationStep.html#method_warnings",
+			"d": "<p>Non-fatal warnings raised while planning this step.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceModule::entrypoint",
+			"p": "Dagger/WorkspaceModule.html#method_entrypoint",
+			"d": "<p>Whether the module is the workspace entrypoint (functions aliased to Query root).</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceModule::id",
+			"p": "Dagger/WorkspaceModule.html#method_id",
+			"d": "<p>A unique identifier for this WorkspaceModule.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceModule::name",
+			"p": "Dagger/WorkspaceModule.html#method_name",
+			"d": "<p>The module name.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceModule::settings",
+			"p": "Dagger/WorkspaceModule.html#method_settings",
+			"d": "<p>List constructor-backed settings for this module.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceModule::source",
+			"p": "Dagger/WorkspaceModule.html#method_source",
+			"d": "<p>The module source path.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceModuleSetting::description",
+			"p": "Dagger/WorkspaceModuleSetting.html#method_description",
+			"d": "<p>The constructor argument description.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceModuleSetting::id",
+			"p": "Dagger/WorkspaceModuleSetting.html#method_id",
+			"d": "<p>A unique identifier for this WorkspaceModuleSetting.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceModuleSetting::key",
+			"p": "Dagger/WorkspaceModuleSetting.html#method_key",
+			"d": "<p>The setting key.</p>"
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\WorkspaceModuleSetting::value",
+			"p": "Dagger/WorkspaceModuleSetting.html#method_value",
+			"d": "<p>The configured value after applying the selected workspace environment, or empty when unset.</p>"
+		},
+		{
+			"t": "M",
 			"n": "Dagger\\Client\\IdAble::id",
 			"p": "Dagger/Client/IdAble.html#method_id",
+			"d": null
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Exportable::export",
+			"p": "Dagger/Exportable.html#method_export",
+			"d": null
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Exportable::id",
+			"p": "Dagger/Exportable.html#method_id",
+			"d": null
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Node::id",
+			"p": "Dagger/Node.html#method_id",
+			"d": null
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Syncer::id",
+			"p": "Dagger/Syncer.html#method_id",
+			"d": null
+		},
+		{
+			"t": "M",
+			"n": "Dagger\\Syncer::sync",
+			"p": "Dagger/Syncer.html#method_sync",
 			"d": null
 		},
 		{

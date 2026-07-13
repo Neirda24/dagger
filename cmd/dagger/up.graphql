@@ -1,8 +1,0 @@
-query UpGroupListDetails($id: UpGroupID!) {
-  group: loadUpGroupFromID(id: $id) {
-    list {
-      name
-      description
-    }
-  }
-}

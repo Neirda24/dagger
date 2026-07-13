@@ -57,6 +57,20 @@ type ObjectType interface {
 	FieldSpecs(view call.View) []FieldSpec
 }
 
+// ForkableObjectType is an installed object type that can be safely cloned
+// into another server without sharing mutable server-bound state like field
+// tables or schema-cache invalidation callbacks.
+type ForkableObjectType interface {
+	ForkObjectType(*Server) (ObjectType, error)
+}
+
+// TypeResolver is the minimal schema lookup surface needed by dagql cache and
+// persisted-payload reconstruction.
+type TypeResolver interface {
+	ObjectType(name string) (ObjectType, bool)
+	ScalarType(name string) (ScalarType, bool)
+}
+
 type IDType interface {
 	Input
 	IDable
@@ -67,10 +81,21 @@ type IDType interface {
 // to the object's external interface.
 type FieldFunc func(context.Context, AnyResult, map[string]Input) (AnyResult, error)
 
+// LoadByIDFunc is the builtin execution path for schema-generated
+// load<Type>FromID fields.
+type LoadByIDFunc func(context.Context, AnyResult, map[string]Input) (AnyResult, error)
+
 type IDable interface {
-	// ID returns the ID of the value.
-	ID() *call.ID
+	// ID returns the runtime handle ID of the value.
+	ID() (*call.ID, error)
 }
+
+type RecipeIDable interface {
+	// RecipeID returns the semantic recipe ID of the value.
+	RecipeID(context.Context) (*call.ID, error)
+}
+
+type SessionResourceHandle string
 
 // AnyResult is a Typed value wrapped with an ID constructor. The wrapped value may
 // be any graphql type, including scalars, objects, arrays, etc.
@@ -80,8 +105,11 @@ type AnyResult interface {
 	Typed
 	Wrapper
 	IDable
-	PostCallable
+	RecipeIDable
 	Setter
+
+	// RecipeDigest returns the semantic recipe digest of the value.
+	RecipeDigest(context.Context) (digest.Digest, error)
 
 	// DerefValue returns an AnyResult when the wrapped value is Derefable and
 	// has a value set. If the value is not derefable, it returns itself.
@@ -89,23 +117,22 @@ type AnyResult interface {
 
 	// NthValue returns the Nth value of the wrapped value when the wrapped value
 	// is an Enumerable. If the wrapped value is not Enumerable, it returns an error.
-	NthValue(int) (AnyResult, error)
+	NthValue(context.Context, int) (AnyResult, error)
 
-	// WithPostCall returns a new AnyResult with the given post-call function attached to it.
-	WithPostCall(fn PostCallFunc) AnyResult
-
-	// IsSafeToPersistCache returns whether it's safe to persist this result in the cache.
-	IsSafeToPersistCache() bool
-
-	// WithSafeToPersistCache returns a new AnyResult with the given safe-to-persist-cache flag.
-	WithSafeToPersistCache(safe bool) AnyResult
+	// NullableWrapped returns a nullable view over the same underlying result.
+	NullableWrapped() AnyResult
 
 	// WithContentDigest returns a new AnyResult with the given content digest.
-	WithContentDigestAny(digest.Digest) AnyResult
+	WithContentDigestAny(context.Context, digest.Digest) (AnyResult, error)
+	// WithSessionResourceHandle returns a new AnyResult with the given session resource handle.
+	WithSessionResourceHandleAny(context.Context, SessionResourceHandle) (AnyResult, error)
 
 	HitCache() bool
-	HitContentDigestCache() bool
-	Release(context.Context) error
+	ResultCall() (*ResultCall, error)
+
+	// cacheSharedResult returns the internal cache-backed shared payload when present.
+	// It is intentionally package-private so only dagql-owned result types satisfy AnyResult.
+	cacheSharedResult() *sharedResult
 }
 
 // AnyObjectResult is an AnyResult that wraps a selectable value (i.e. a graph object)
@@ -115,13 +142,8 @@ type AnyObjectResult interface {
 	// ObjectType returns the type of the object.
 	ObjectType() ObjectType
 
-	// Call evaluates the field selected by the given ID and returns the result.
-	//
-	// The returned value is the raw Typed value returned from the field; it must
-	// be instantiated with a class for further selection.
-	//
-	// Any Nullable values are automatically unwrapped.
-	Call(context.Context, *Server, *call.ID) (AnyResult, error)
+	// Receiver resolves the object result referenced by this result call's receiver, if any.
+	Receiver(context.Context, *Server) (AnyObjectResult, error)
 
 	// Select evaluates the field selected by the given selector and returns the result.
 	//
@@ -132,23 +154,55 @@ type AnyObjectResult interface {
 	Select(context.Context, *Server, Selector) (AnyResult, error)
 }
 
-// InterfaceValue is a value that wraps some underlying object with a interface to that object's API. This type exists to support unwrapping it and getting the underlying object.
-type InterfaceValue interface {
-	// UnderlyingObject returns the underlying object of the InterfaceValue
-	UnderlyingObject() (Typed, error)
-}
-
-// PostCallable is a type that has a callback attached that needs to always run before returned to a caller
-// whether or not the type is being returned from cache or not
-type PostCallable interface {
-	// Call the postcall func (or no-op if none is set)
-	PostCall(context.Context) error
-}
-
 // A type that has a callback attached that needs to always run when the result is removed
 // from the cache
 type OnReleaser interface {
 	OnRelease(context.Context) error
+}
+
+type LazyEvalFunc func(context.Context) error
+
+type HasLazyEvaluation interface {
+	LazyEvalFunc() LazyEvalFunc
+}
+
+// HasDependencyResults is implemented by resolver-returned values that embed
+// dependency results which must be normalized onto attached/cache-backed
+// results before lifecycle bookkeeping or persistence.
+//
+// Implementations must:
+//   - use self when they need to rewrite internal references to the attached
+//     owner result itself
+//   - call attach for each embedded child result that should be normalized
+//   - rewrite themselves in place to point at the attached result returned by attach
+//   - return only the subset of attached child results that should become
+//     explicit non-structural cache dependency edges
+//
+// Returned deps are treated as owned: the install span of the parent (the API
+// span that returned the parent value to a session) is attributed to each
+// dep, so failures in the dep's lazy work mark the parent's install span as
+// caused-failed. Implementations that want some deps to be liveness-only (no
+// failure attribution) should implement HasDependencyResultsKinds instead.
+type HasDependencyResults interface {
+	AttachDependencyResults(context.Context, AnyResult, func(AnyResult) (AnyResult, error)) ([]AnyResult, error)
+}
+
+// DependencyResult is an attached dependency result with a kind flag.
+type DependencyResult struct {
+	Result AnyResult
+	// Owned is true when the parent's install span should also be attributed
+	// to this dep for lazy failure causality. False marks the edge as
+	// liveness-only — the dep is kept alive by the parent and preflighted
+	// before the parent's lazy callback, but failures in the dep do not
+	// short-circuit attribution onto the parent's install span.
+	Owned bool
+}
+
+// HasDependencyResultsKinds is the kind-aware variant of HasDependencyResults.
+// When a value implements both, this one is preferred — the result kind flag
+// (Owned) controls install-span propagation for failure attribution.
+type HasDependencyResultsKinds interface {
+	AttachDependencyResultsKinds(context.Context, AnyResult, func(AnyResult) (AnyResult, error)) ([]DependencyResult, error)
 }
 
 // ScalarType represents a GraphQL Scalar type.
@@ -647,6 +701,91 @@ func (s SerializedString[T]) SetField(v reflect.Value) error {
 	}
 }
 
+type DigestedSerializedString[T any] struct {
+	Self   T
+	Digest digest.Digest
+}
+
+func NewDigestedSerializedString[T any](val T, dig digest.Digest) DigestedSerializedString[T] {
+	return DigestedSerializedString[T]{
+		Self:   val,
+		Digest: dig,
+	}
+}
+
+var _ Typed = DigestedSerializedString[any]{}
+
+func (DigestedSerializedString[T]) Type() *ast.Type {
+	return &ast.Type{
+		NamedType: "String",
+		NonNull:   true,
+	}
+}
+
+var _ InputDecoder = DigestedSerializedString[any]{}
+
+func (DigestedSerializedString[T]) DecodeInput(val any) (Input, error) {
+	switch x := val.(type) {
+	case string:
+		var v T
+		err := json.Unmarshal([]byte(x), &v)
+		if err != nil {
+			return nil, err
+		}
+		return NewDigestedSerializedString(v, ""), nil
+	default:
+		return nil, fmt.Errorf("cannot create DigestedSerializedString from %T", x)
+	}
+}
+
+var _ Input = DigestedSerializedString[any]{}
+
+func (s DigestedSerializedString[T]) Decoder() InputDecoder {
+	return s
+}
+
+func (s DigestedSerializedString[T]) ToLiteral() call.Literal {
+	return call.NewLiteralDigestedString(s.String(), s.Digest)
+}
+
+func (s DigestedSerializedString[T]) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.Self)
+}
+
+func (s *DigestedSerializedString[T]) UnmarshalJSON(p []byte) error {
+	var v T
+	if err := json.Unmarshal(p, &v); err != nil {
+		return err
+	}
+	*s = DigestedSerializedString[T]{
+		Self: v,
+	}
+	return nil
+}
+
+func (s DigestedSerializedString[T]) String() string {
+	res, err := s.MarshalJSON()
+	if err != nil {
+		panic(err)
+	}
+	return string(res)
+}
+
+var _ Setter = DigestedSerializedString[any]{}
+
+func (s DigestedSerializedString[T]) SetField(v reflect.Value) error {
+	switch v.Interface().(type) {
+	case DigestedSerializedString[T]:
+		v.Set(reflect.ValueOf(s))
+		return nil
+	case SerializedString[T]:
+		v.Set(reflect.ValueOf(SerializedString[T]{Self: s.Self}))
+		return nil
+	default:
+		return fmt.Errorf("cannot set field of type %T with %T", v.Interface(), s)
+	}
+}
+
 type ScalarValue interface {
 	ScalarType
 	Input
@@ -700,6 +839,15 @@ func (s Scalar[T]) DecodeInput(val any) (Input, error) {
 
 var _ Input = Scalar[ScalarValue]{}
 
+var _ Wrapper = Scalar[ScalarValue]{}
+
+// Unwrap exposes the inner scalar value so callers (e.g. UnwrapAs) can
+// reach interfaces implemented by T — for instance, when T is AnyID,
+// IDable is reachable through the wrapped value.
+func (s Scalar[T]) Unwrap() Typed {
+	return s.Value
+}
+
 func (s Scalar[T]) Decoder() InputDecoder {
 	return s
 }
@@ -714,6 +862,111 @@ func (s Scalar[T]) MarshalJSON() ([]byte, error) {
 
 func (s *Scalar[T]) UnmarshalJSON(p []byte) error {
 	return json.Unmarshal(p, &s.Value)
+}
+
+// AnyID is the schema type for the generic `ID!` scalar used by every object.
+// Type-specific expectations are conveyed by @expectedType directives on
+// fields and arguments instead of separate per-type ID scalars.
+type AnyID struct {
+	id *call.ID
+}
+
+func NewAnyID(id *call.ID) AnyID {
+	return AnyID{id: id}
+}
+
+var _ Typed = AnyID{}
+
+func (AnyID) Type() *ast.Type {
+	return &ast.Type{
+		NamedType: "ID",
+		NonNull:   true,
+	}
+}
+
+func (AnyID) TypeName() string {
+	return "ID"
+}
+
+func (AnyID) TypeDescription() string {
+	return "A unique identifier for an object."
+}
+
+var _ IDable = AnyID{}
+
+func (a AnyID) ID() (*call.ID, error) {
+	if a.id == nil {
+		return nil, fmt.Errorf("nil ID")
+	}
+	return a.id, nil
+}
+
+var _ ScalarType = AnyID{}
+
+func (a AnyID) TypeDefinition(_ call.View) *ast.Definition {
+	return &ast.Definition{
+		Kind:        ast.Scalar,
+		Name:        "ID",
+		Description: "A unique identifier for an object.",
+		BuiltIn:     true,
+	}
+}
+
+func (a AnyID) Decoder() InputDecoder {
+	return a
+}
+
+func (a AnyID) ToLiteral() call.Literal {
+	if a.id == nil {
+		return call.NewLiteralString("")
+	}
+	return call.NewLiteralID(a.id)
+}
+
+func (AnyID) DecodeInput(val any) (Input, error) {
+	switch x := val.(type) {
+	case *call.ID:
+		return AnyID{id: x}, nil
+	case string:
+		if x == "" {
+			return nil, nil
+		}
+		var id call.ID
+		if err := id.Decode(x); err != nil {
+			return nil, fmt.Errorf("invalid ID string: %w", err)
+		}
+		return AnyID{id: &id}, nil
+	default:
+		return nil, fmt.Errorf("cannot convert %T to ID", val)
+	}
+}
+
+func (a AnyID) MarshalJSON() ([]byte, error) {
+	if a.id == nil {
+		return json.Marshal("")
+	}
+	enc, err := a.id.Encode()
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(enc)
+}
+
+// ExpectedTypeDirective creates an @expectedType(name: "Foo") directive
+// for annotating ID arguments with their expected type.
+func ExpectedTypeDirective(typeName string) *ast.Directive {
+	return &ast.Directive{
+		Name: "expectedType",
+		Arguments: ast.ArgumentList{
+			{
+				Name: "name",
+				Value: &ast.Value{
+					Kind: ast.StringValue,
+					Raw:  typeName,
+				},
+			},
+		},
+	}
 }
 
 // ID is a type-checked ID scalar.
@@ -732,13 +985,6 @@ func NewID[T Typed](id *call.ID) ID[T] {
 	}
 }
 
-func NewDynamicID[T Typed](id *call.ID, typed T) ID[T] {
-	return ID[T]{
-		id:    id,
-		inner: typed,
-	}
-}
-
 func IDTypeNameFor(t Typed) string {
 	return t.Type().Name() + "ID"
 }
@@ -747,17 +993,25 @@ func IDTypeNameForRawType(t string) string {
 	return t + "ID"
 }
 
-// TypeName returns the name of the type with "ID" appended, e.g. `FooID`.
+// TypeName returns "ID" — all typed IDs share the same scalar in the schema.
+// The expected type is conveyed via @expectedType directives on arguments.
 func (i ID[T]) TypeName() string {
-	return IDTypeNameFor(i.inner)
+	return "ID"
+}
+
+// ExpectedTypeName returns the name of the expected type for this ID,
+// e.g. "Container" for ID[*Container]. Used for @expectedType directives
+// and runtime validation.
+func (i ID[T]) ExpectedTypeName() string {
+	return i.inner.Type().Name()
 }
 
 var _ Typed = ID[Typed]{}
 
-// Type returns the GraphQL type of the value.
+// Type returns the GraphQL type of the value — always `ID!`.
 func (i ID[T]) Type() *ast.Type {
 	return &ast.Type{
-		NamedType: i.TypeName(),
+		NamedType: "ID",
 		NonNull:   true,
 	}
 }
@@ -765,30 +1019,25 @@ func (i ID[T]) Type() *ast.Type {
 var _ IDable = ID[Typed]{}
 
 // ID returns the ID of the value.
-func (i ID[T]) ID() *call.ID {
-	return i.id
+func (i ID[T]) ID() (*call.ID, error) {
+	if i.id == nil {
+		return nil, fmt.Errorf("nil ID")
+	}
+	return i.id, nil
 }
 
 var _ ScalarType = ID[Typed]{}
 
-// TypeDefinition returns the GraphQL definition of the type.
+// TypeDefinition returns the definition for the ID scalar.
+// Since all IDs share the same scalar type, this returns the
+// built-in ID definition.
 func (i ID[T]) TypeDefinition(view call.View) *ast.Definition {
-	typedef := &ast.Definition{
-		Kind: ast.Scalar,
-		Name: i.TypeName(),
-		Description: fmt.Sprintf(
-			"The `%s` scalar type represents an identifier for an object of type %s.",
-			i.TypeName(),
-			i.inner.Type().Name(),
-		),
-		BuiltIn: true,
+	return &ast.Definition{
+		Kind:        ast.Scalar,
+		Name:        "ID",
+		Description: "A unique identifier for an object.",
+		BuiltIn:     true,
 	}
-
-	if i.sourceMap != nil {
-		typedef.Directives = append(typedef.Directives, i.sourceMap)
-	}
-
-	return typedef
 }
 
 // New creates a new ID with the given value.
@@ -798,6 +1047,16 @@ func (i ID[T]) TypeDefinition(view call.View) *ast.Definition {
 func (i ID[T]) DecodeInput(val any) (Input, error) {
 	switch x := val.(type) {
 	case *call.ID:
+		if x == nil {
+			return nil, fmt.Errorf("cannot create ID[%T] from nil *call.ID", i.inner)
+		}
+		expectedName := i.inner.Type().Name()
+		if x.Type() == nil {
+			return nil, fmt.Errorf("expected %q ID, got untyped ID", expectedName)
+		}
+		if x.Type().NamedType() != expectedName {
+			return nil, fmt.Errorf("expected %q ID, got %s ID", expectedName, x.Type().ToAST())
+		}
 		return ID[T]{id: x, inner: i.inner}, nil
 	case string:
 		if err := (&i).Decode(x); err != nil {
@@ -809,17 +1068,29 @@ func (i ID[T]) DecodeInput(val any) (Input, error) {
 	}
 }
 
-// String returns the ID in ClassID@sha256:... format.
+// String returns the ID in TypeName@<encoded-id> debug format.
 func (i ID[T]) String() string {
-	return fmt.Sprintf("%s@%s", i.inner.Type().Name(), i.id.Digest())
+	typeName := i.inner.Type().Name()
+	if i.id == nil {
+		return fmt.Sprintf("%s@<nil>", typeName)
+	}
+	enc, err := i.id.Encode()
+	if err != nil {
+		return fmt.Sprintf("%s@<encode-error:%v>", typeName, err)
+	}
+	return fmt.Sprintf("%s@%s", typeName, enc)
 }
 
 var _ Setter = ID[Typed]{}
 
 func (i ID[T]) SetField(v reflect.Value) error {
+	id, err := i.ID()
+	if err != nil {
+		return err
+	}
 	switch v.Interface().(type) {
 	case *call.ID:
-		v.Set(reflect.ValueOf(i.ID))
+		v.Set(reflect.ValueOf(id))
 		return nil
 	default:
 		return fmt.Errorf("cannot set field of type %T with %T", v.Interface(), i)
@@ -834,7 +1105,17 @@ func (i ID[T]) Decoder() InputDecoder {
 }
 
 func (i ID[T]) ToLiteral() call.Literal {
-	return call.NewLiteralID(i.id)
+	if i.id == nil {
+		panic("dagql.ID.ToLiteral: nil ID")
+	}
+	if !i.id.IsHandle() {
+		panic("dagql.ID.ToLiteral: recipe-form IDs are not valid inputs")
+	}
+	enc, err := i.id.Encode()
+	if err != nil {
+		panic(fmt.Errorf("dagql.ID.ToLiteral: encode handle ID: %w", err))
+	}
+	return call.NewLiteralString(enc)
 }
 
 func (i ID[T]) Encode() (string, error) {
@@ -849,16 +1130,18 @@ func (i *ID[T]) Decode(str string) error {
 	if str == "" {
 		return fmt.Errorf("cannot decode empty string as ID")
 	}
-	expectedName := i.inner.Type().Name()
 	var idp call.ID
 	if err := idp.Decode(str); err != nil {
 		return err
 	}
-	if idp.Type() == nil {
-		return fmt.Errorf("expected %q ID, got untyped ID", expectedName)
-	}
-	if idp.Type().NamedType() != expectedName {
-		return fmt.Errorf("expected %q ID, got %s ID", expectedName, idp.Type().ToAST())
+	// Runtime type validation: check that the ID's embedded type matches
+	// the expected type. This catches programming errors where the wrong
+	// ID is passed.
+	expectedName := i.inner.Type().Name()
+	if expectedName != "" && idp.Type() != nil {
+		if idp.Type().NamedType() != expectedName {
+			return fmt.Errorf("expected %q ID, got %s ID", expectedName, idp.Type().ToAST())
+		}
 	}
 	i.id = &idp
 	return nil
@@ -890,13 +1173,16 @@ func (i *ID[T]) UnmarshalJSON(p []byte) error {
 
 // Load loads the instance with the given ID from the server.
 func (i ID[T]) Load(ctx context.Context, server *Server) (res ObjectResult[T], _ error) {
+	if i.id == nil {
+		return res, fmt.Errorf("load %s: nil ID", i.TypeName())
+	}
 	val, err := server.Load(ctx, i.id)
 	if err != nil {
-		return res, fmt.Errorf("load %s: %w", i.id.DisplaySelf(), err)
+		return res, fmt.Errorf("load %s: %w", i.String(), err)
 	}
 	obj, ok := val.(ObjectResult[T])
 	if !ok {
-		return res, fmt.Errorf("load %s: expected %T, got %T", i.id.DisplaySelf(), obj, val)
+		return res, fmt.Errorf("load %s: expected %T, got %T", i.String(), obj, val)
 	}
 	return obj, nil
 }
@@ -911,7 +1197,7 @@ type Enumerable interface {
 	// first entry.
 	Nth(int) (Typed, error)
 
-	NthValue(i int, enumID *call.ID) (AnyResult, error)
+	NthValue(i int, call *ResultCall) (AnyResult, error)
 }
 
 // Array is an array of GraphQL values.
@@ -947,6 +1233,14 @@ var _ Input = ArrayInput[Input]{}
 
 func (a ArrayInput[S]) Decoder() InputDecoder {
 	return a
+}
+
+func (a ArrayInput[S]) resultCallArrayValues() []Input {
+	values := make([]Input, len(a))
+	for i, val := range a {
+		values[i] = val
+	}
+	return values
 }
 
 var _ InputDecoder = ArrayInput[Input]{}
@@ -1068,13 +1362,21 @@ func (arr Array[T]) Nth(i int) (Typed, error) {
 	return arr.nth(i)
 }
 
-func (arr Array[T]) NthValue(i int, enumID *call.ID) (AnyResult, error) {
+func (arr Array[T]) NthValue(i int, call *ResultCall) (AnyResult, error) {
 	t, err := arr.nth(i)
 	if err != nil {
 		return nil, err
 	}
 
-	return newDetachedResult(enumID.SelectNth(i), t), nil
+	if call == nil {
+		return nil, fmt.Errorf("index %d from %T without call frame", i, arr)
+	}
+	elemCall := call.clone()
+	elemCall.Nth = int64(i)
+	if elemCall.Type != nil {
+		elemCall.Type = elemCall.Type.Elem
+	}
+	return newDetachedResult(elemCall, t), nil
 }
 
 type ResultArray[T Typed] []Result[T]
@@ -1114,7 +1416,7 @@ func (arr ResultArray[T]) Nth(i int) (Typed, error) {
 	return inst.Self(), nil
 }
 
-func (arr ResultArray[T]) NthValue(i int, enumID *call.ID) (AnyResult, error) {
+func (arr ResultArray[T]) NthValue(i int, _ *ResultCall) (AnyResult, error) {
 	inst, err := arr.nth(i)
 	if err != nil {
 		return nil, err
@@ -1127,6 +1429,7 @@ type ObjectResultArray[T Typed] []ObjectResult[T]
 
 var _ Typed = ObjectResultArray[Typed]{}
 var _ Enumerable = ObjectResultArray[Typed]{}
+var _ HasDependencyResults = ObjectResultArray[Typed]{}
 
 func (i ObjectResultArray[T]) Type() *ast.Type {
 	var t T
@@ -1160,13 +1463,38 @@ func (arr ObjectResultArray[T]) Nth(i int) (Typed, error) {
 	return inst.Self(), nil
 }
 
-func (arr ObjectResultArray[T]) NthValue(i int, enumID *call.ID) (AnyResult, error) {
+func (arr ObjectResultArray[T]) NthValue(i int, _ *ResultCall) (AnyResult, error) {
 	inst, err := arr.nth(i)
 	if err != nil {
 		return nil, err
 	}
 
 	return inst, nil
+}
+
+func (arr ObjectResultArray[T]) AttachDependencyResults(
+	_ context.Context,
+	_ AnyResult,
+	attach func(AnyResult) (AnyResult, error),
+) ([]AnyResult, error) {
+	owned := make([]AnyResult, 0, len(arr))
+	for i, child := range arr {
+		attached, err := attach(child)
+		if err != nil {
+			return nil, err
+		}
+		if attached == nil {
+			arr[i] = ObjectResult[T]{}
+			continue
+		}
+		typed, ok := attached.(ObjectResult[T])
+		if !ok {
+			return nil, fmt.Errorf("attach object result array child %d: unexpected result %T", i, attached)
+		}
+		arr[i] = typed
+		owned = append(owned, typed)
+	}
+	return owned, nil
 }
 
 type enumValue interface {
@@ -1319,9 +1647,8 @@ func (e *EnumValues[T]) AliasView(val T, target T, view ViewFilter) T {
 	panic(fmt.Sprintf("cannot find enum %q", target))
 }
 
-func (e *EnumValues[T]) Install(srv *Server) {
-	var zero T
-	srv.scalars[zero.Type().Name()] = e
+func (e *EnumValues[T]) Install(srv *Server, filter ...ViewFilter) {
+	srv.InstallScalar(e, filter...)
 }
 
 type EnumValueName struct {
@@ -1397,8 +1724,8 @@ type InputObjectSpec struct {
 	Fields      InputSpecs
 }
 
-func (spec InputObjectSpec) Install(srv *Server) {
-	srv.InstallTypeDef(spec)
+func (spec InputObjectSpec) Install(srv *Server, filter ...ViewFilter) {
+	srv.InstallTypeDef(spec, filter...)
 }
 
 func (spec InputObjectSpec) Type() *ast.Type {

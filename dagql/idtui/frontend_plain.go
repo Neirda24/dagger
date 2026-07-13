@@ -38,8 +38,9 @@ type frontendPlain struct {
 	telemetryError atomic.Pointer[error]
 
 	// db stores info about all the spans
-	db   *dagui.DB
-	data map[dagui.SpanID]*spanData
+	db       *dagui.DB
+	data     map[dagui.SpanID]*spanData
+	testLogs map[dagui.SpanID]*Vterm
 
 	// idx is an incrementing counter to assign human-readable names to spans
 	idx uint
@@ -115,8 +116,9 @@ type logLine struct {
 func NewPlain(w io.Writer) Frontend {
 	db := dagui.NewDB()
 	return &frontendPlain{
-		db:   db,
-		data: make(map[dagui.SpanID]*spanData),
+		db:       db,
+		data:     make(map[dagui.SpanID]*spanData),
+		testLogs: make(map[dagui.SpanID]*Vterm),
 
 		profile:        ColorProfile(),
 		output:         NewOutput(w),
@@ -207,6 +209,11 @@ func (fe *frontendPlain) Run(ctx context.Context, opts dagui.FrontendOpts, run f
 	cleanup, runErr := run(ctx)
 	if cleanup != nil {
 		runErr = errors.Join(runErr, cleanup())
+	}
+
+	if _, ok := renderQuietError(fe.output.Writer(), runErr); ok {
+		fe.db.WriteDot(opts.DotOutputFilePath, opts.DotFocusField, opts.DotShowInternal)
+		return normalizeFrontendExit(runErr, fe.db)
 	}
 
 	fe.finalRender()
@@ -301,6 +308,10 @@ func (fe plainSpanExporter) ExportSpans(ctx context.Context, spans []sdktrace.Re
 		spanDt.parentID = dagui.SpanID{SpanID: span.Parent().SpanID()}
 
 		spanDt.ready = true
+
+		if logs := fe.db.DrainResolvedLogs(spanID); len(logs) > 0 {
+			fe.appendLogs(spanID, logs)
+		}
 	}
 	return nil
 }
@@ -337,13 +348,26 @@ func (fe plainLogExporter) Export(ctx context.Context, logs []sdklog.Record) err
 			continue
 		}
 
-		spanID := dagui.SpanID{SpanID: record.SpanID()}
-		spanDt, ok := fe.data[spanID]
-		if !ok {
-			spanDt = &spanData{}
-			fe.data[spanID] = spanDt
+		spanID := fe.db.LogTargetSpanID(record)
+		if !spanID.IsValid() {
+			continue
 		}
 
+		fe.appendLogs(spanID, []sdklog.Record{record})
+	}
+	return nil
+}
+
+func (fe *frontendPlain) appendLogs(spanID dagui.SpanID, records []sdklog.Record) {
+	appendTestSummaryLogRecords(fe.testLogs, fe.profile, spanID, records)
+
+	spanDt, ok := fe.data[spanID]
+	if !ok {
+		spanDt = &spanData{}
+		fe.data[spanID] = spanDt
+	}
+
+	for _, record := range records {
 		body := record.Body().AsString()
 		if body == "" {
 			// NOTE: likely just indicates EOF (stdio.eof=true attr); either way we
@@ -375,7 +399,6 @@ func (fe plainLogExporter) Export(ctx context.Context, logs []sdklog.Record) err
 			spanDt.logsPending = !hasNewline
 		}
 	}
-	return nil
 }
 
 func (fe *frontendPlain) ForceFlush(context.Context) error {
@@ -429,6 +452,9 @@ func (fe *frontendPlain) finalRender() {
 		// if we rendered anything, leave a newline
 		fmt.Fprintln(stderr)
 	}
+	if !fe.Silent && fe.renderFinalTests() {
+		fmt.Fprintln(stderr)
+	}
 
 	var telemetryErr error
 	if p := fe.telemetryError.Load(); p != nil {
@@ -440,6 +466,22 @@ func (fe *frontendPlain) finalRender() {
 		fmt.Fprintln(stderr, "\n"+fe.msgPreFinalRender.String()+"\n")
 	}
 	renderPrimaryOutput(stderr, fe.db)
+}
+
+func (fe *frontendPlain) renderFinalTests() bool {
+	view := fe.db.TestView()
+	if !view.HasTests() {
+		return false
+	}
+	tv := &TestView{
+		Profile:         fe.profile,
+		Logs:            fe.testLogs,
+		SummaryLogLines: -1,
+	}
+	for _, line := range tv.renderTestSummaryLines(fe.output, view, 80, finalTestViewHeight(tv)) {
+		fmt.Fprintln(fe.output, line)
+	}
+	return true
 }
 
 func (fe *frontendPlain) renderProgress() {

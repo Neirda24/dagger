@@ -10,18 +10,17 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/containerd/continuity/sysx"
-	bkcache "github.com/dagger/dagger/internal/buildkit/cache"
-	bkcontenthash "github.com/dagger/dagger/internal/buildkit/cache/contenthash"
-	"github.com/dagger/dagger/internal/buildkit/session"
-	"github.com/dagger/dagger/internal/buildkit/snapshot"
+	bkcontenthash "github.com/dagger/dagger/engine/contenthash"
+	bkcache "github.com/dagger/dagger/engine/snapshots"
 	"github.com/dagger/dagger/internal/buildkit/util/bklog"
 	"github.com/dagger/dagger/internal/fsutil"
-	fscopy "github.com/dagger/dagger/internal/fsutil/copy"
 	"github.com/dagger/dagger/internal/fsutil/types"
 	"github.com/dagger/dagger/util/hashutil"
+	"github.com/dagger/dagger/util/layercopy"
 	digest "github.com/opencontainers/go-digest"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -30,15 +29,18 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sys/unix"
 
-	"github.com/dagger/dagger/engine/contenthash"
 	telemetry "github.com/dagger/otel-go"
 )
 
 const (
-	hashXattrKey = "user.daggerContentHash"
+	hashXattrKey = "user.daggerContentHash.v2"
 )
 
-// localFSSharedState is the state shared between all syncs for a given client
+func isMissingContentHashXattr(err error) bool {
+	return errors.Is(err, unix.ENODATA)
+}
+
+// localFSSharedState is the state shared between all syncs for a given client.
 type localFSSharedState struct {
 	// rootPath is the abs path to the mounted cache ref that we sync all files/dirs for
 	// a given client
@@ -47,6 +49,15 @@ type localFSSharedState struct {
 	// changeCache is the cache we use to dedupe/cache changes made to the local fs across
 	// different syncs (see docs on localFS.Sync for more info)
 	changeCache *changeCache
+}
+
+type MirrorSharedState = localFSSharedState
+
+func NewMirrorSharedState(rootPath string) *MirrorSharedState {
+	return &MirrorSharedState{
+		rootPath:    rootPath,
+		changeCache: newChangeCache(),
+	}
 }
 
 type ChangeWithStat struct {
@@ -76,7 +87,7 @@ type localFS struct {
 	excludes []string // the exclude patterns we're using for this sync
 }
 
-func newLocalFS(sharedState *localFSSharedState, subdir string, includes, excludes []string, copyPath string) (*localFS, error) {
+func newLocalFS(sharedState *MirrorSharedState, subdir string, includes, excludes, followPaths []string, copyPath string) (*localFS, error) {
 	baseFS, err := fsutil.NewFS(filepath.Join(sharedState.rootPath, subdir))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create base fs: %w", err)
@@ -85,6 +96,7 @@ func newLocalFS(sharedState *localFSSharedState, subdir string, includes, exclud
 	filterFS, err := fsutil.NewFilterFS(baseFS, &fsutil.FilterOpt{
 		IncludePatterns: includes,
 		ExcludePatterns: excludes,
+		FollowPaths:     followPaths,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create filter fs: %w", err)
@@ -98,6 +110,35 @@ func newLocalFS(sharedState *localFSSharedState, subdir string, includes, exclud
 		excludes:           excludes,
 		copyPath:           copyPath,
 	}, nil
+}
+
+func localCopyOnlyPaths(only map[string]struct{}, basePath string) map[string]struct{} {
+	filtered := make(map[string]struct{}, len(only))
+	basePath = cleanLocalCopyPath(basePath)
+	for p := range only {
+		p = cleanLocalCopyPath(p)
+		if basePath != "" {
+			if p == basePath {
+				filtered[""] = struct{}{}
+				continue
+			}
+			prefix := basePath + string(filepath.Separator)
+			if !strings.HasPrefix(p, prefix) {
+				continue
+			}
+			p = strings.TrimPrefix(p, prefix)
+		}
+		filtered[p] = struct{}{}
+	}
+	return filtered
+}
+
+func cleanLocalCopyPath(p string) string {
+	p = filepath.Clean(p)
+	if p == "." || p == string(filepath.Separator) {
+		return ""
+	}
+	return strings.TrimPrefix(p, string(filepath.Separator))
 }
 
 // Sync the given remote fs into the local fs, returning an immutable cache ref containing the files+dirs
@@ -122,18 +163,17 @@ func (local *localFS) Sync( //nolint:gocyclo
 	ctx context.Context,
 	remote ReadFS,
 	cacheManager bkcache.Accessor,
-	session session.Group,
 	forParents bool,
-) (_ bkcache.ImmutableRef, rerr error) {
+) (_ bkcache.ImmutableRef, _ digest.Digest, rerr error) {
 	var newCopyRef bkcache.MutableRef       // the mutable ref we will copy into with the frozen files+dirs if needed
 	var cacheCtx bkcontenthash.CacheContext // track file+dir hashes
 
 	// skip creating a cache ref if we're only syncing parent dirs
 	if !forParents {
 		var err error
-		newCopyRef, err = cacheManager.New(ctx, nil, nil)
+		newCopyRef, err = cacheManager.New(ctx, nil)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create new copy ref: %w", err)
+			return nil, "", fmt.Errorf("failed to create new copy ref: %w", err)
 		}
 		defer func() {
 			ctx := context.WithoutCancel(ctx)
@@ -144,9 +184,13 @@ func (local *localFS) Sync( //nolint:gocyclo
 			}
 		}()
 
-		cacheCtx, err = bkcontenthash.GetCacheContext(ctx, newCopyRef)
+		newCopyMD, ok := any(newCopyRef).(bkcache.RefMetadata)
+		if !ok {
+			return nil, "", fmt.Errorf("copy ref metadata: unexpected ref type %T", newCopyRef)
+		}
+		cacheCtx, err = bkcontenthash.GetCacheContext(ctx, newCopyMD)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get cache context: %w", err)
+			return nil, "", fmt.Errorf("failed to get cache context: %w", err)
 		}
 	}
 
@@ -169,8 +213,20 @@ func (local *localFS) Sync( //nolint:gocyclo
 		}
 	}()
 
+	// the paths to copy from the mirror into the final snapshot
 	only := map[string]struct{}{}
-	ignoredDirs := map[string]struct{}{}
+
+	// Gitignored dirs are not synced, but a re-included file inside one
+	// ("!foo/bar.txt") can only be written once its parent dir exists in the
+	// mirror. Track ignored dirs so they can be created on demand. They never
+	// enter `only`: ignored dirs are not synced content and should not affect
+	// which files are copied from the mirror into the final snapshot.
+	type ignoredDir struct {
+		kind    ChangeKind
+		stat    *types.Stat
+		created bool
+	}
+	ignoredDirs := map[string]*ignoredDir{}
 	isIgnoredPath := func(path string) bool {
 		for {
 			if _, ok := ignoredDirs[path]; ok {
@@ -191,7 +247,48 @@ func (local *localFS) Sync( //nolint:gocyclo
 	// We assert if we find a file/dir in the given relative path to correctly return
 	// an error if nothing exist in there.
 	// See explanations here: https://github.com/dagger/dagger/pull/10995#issuecomment-3347636652
-	relPathFound := false
+	var relPathFound atomic.Bool
+
+	var ensureIgnoredParentDirs func(path string) error
+	ensureIgnoredParentDirs = func(path string) error {
+		if len(ignoredDirs) == 0 {
+			return nil
+		}
+		dir := filepath.Dir(path)
+		if dir == "." { // paths are relative; "." means we reached the sync root
+			return nil
+		}
+		// create outermost ancestors first
+		if err := ensureIgnoredParentDirs(dir); err != nil {
+			return err
+		}
+		ignored, ok := ignoredDirs[dir]
+		if !ok || ignored.created {
+			return nil
+		}
+		appliedChange, err := local.Mkdir(egCtx, ignored.kind, dir, ignored.stat)
+		if err != nil {
+			return err
+		}
+		ignored.created = true
+		cachedResultsMu.Lock()
+		cachedResults = append(cachedResults, appliedChange)
+		cachedResultsMu.Unlock()
+
+		doHandle := cacheCtx != nil
+		if local.copyPath != "" {
+			dir, doHandle = strings.CutPrefix(dir, local.copyPath)
+		}
+		if doHandle {
+			relPathFound.Store(true)
+			applied := appliedChange.result()
+			if err := cacheCtx.HandleChange(applied.kind, dir, applied.stat, nil); err != nil {
+				return fmt.Errorf("failed to handle change in content hasher: %w", err)
+			}
+		}
+
+		return nil
+	}
 
 	// Hardlinks are a bit hard; we can't create them until their source file exists but we sync in files asynchronously.
 	// To deal with this we keep track of the hardlinks we need to make and apply them all at once after everything else
@@ -242,15 +339,33 @@ func (local *localFS) Sync( //nolint:gocyclo
 		})
 	}()
 
+	// Stream cumulative uploaded bytes via the telemetry convention,
+	// attributed to the "uploading <path>" span carried by ctx. The total is
+	// unknown up front (the diff streams), so this renders as a climbing
+	// byte count, and an unchanged directory emits nothing. Parent-dir
+	// syncs transfer only directory entries and are skipped.
+	var uploadedBytes atomic.Int64
+	upload := bkcache.NewProgressTracker(ctx, "bytes", 0, "bytes")
+	countUploaded := func(written int64) {
+		if forParents {
+			return
+		}
+		upload.Update(uploadedBytes.Add(written))
+	}
+	defer upload.Finish()
+
 	doubleWalkDiff(egCtx, eg, local, remote, func(kind ChangeKind, path string, lowerStat, upperStat *types.Stat) error {
 		if upperStat != nil && upperStat.GitIgnored {
 			if upperStat.IsDir() {
-				ignoredDirs[path] = struct{}{}
+				ignoredDirs[path] = &ignoredDir{kind: kind, stat: upperStat}
 			}
 			return nil
 		}
 		switch kind {
 		case ChangeKindAdd, ChangeKindModify:
+			if err := ensureIgnoredParentDirs(path); err != nil {
+				return err
+			}
 			switch {
 			case upperStat.IsDir():
 				appliedChange, err := local.Mkdir(egCtx, kind, path, upperStat)
@@ -267,7 +382,7 @@ func (local *localFS) Sync( //nolint:gocyclo
 					path, doHandle = strings.CutPrefix(path, local.copyPath)
 				}
 				if doHandle {
-					relPathFound = true
+					relPathFound.Store(true)
 					applied := appliedChange.result()
 					if err := cacheCtx.HandleChange(applied.kind, path, applied.stat, nil); err != nil {
 						return fmt.Errorf("failed to handle change in content hasher: %w", err)
@@ -297,7 +412,7 @@ func (local *localFS) Sync( //nolint:gocyclo
 					path, doHandle = strings.CutPrefix(path, local.copyPath)
 				}
 				if doHandle {
-					relPathFound = true
+					relPathFound.Store(true)
 					applied := appliedChange.result()
 					if err := cacheCtx.HandleChange(applied.kind, path, applied.stat, nil); err != nil {
 						return fmt.Errorf("failed to handle change in content hasher: %w", err)
@@ -337,6 +452,7 @@ func (local *localFS) Sync( //nolint:gocyclo
 						attribute.String(telemetry.MetricsTraceIDAttr, rootPathSpan.span.SpanContext().TraceID().String()),
 						attribute.String(telemetry.MetricsSpanIDAttr, rootPathSpan.span.SpanContext().SpanID().String()),
 					}
+					countUploaded(written)
 					rootPathSpan.mu.Lock()
 					rootPathSpan.writtenBytes += written
 					fsMetric.Record(ctx, written, metric.WithAttributes(attrs...))
@@ -363,7 +479,7 @@ func (local *localFS) Sync( //nolint:gocyclo
 						path, doHandle = strings.CutPrefix(path, local.copyPath)
 					}
 					if doHandle {
-						relPathFound = true
+						relPathFound.Store(true)
 						applied := appliedChange.result()
 						if err := cacheCtx.HandleChange(applied.kind, path, applied.stat, nil); err != nil {
 							return fmt.Errorf("failed to handle change in content hasher: %w", err)
@@ -405,6 +521,9 @@ func (local *localFS) Sync( //nolint:gocyclo
 			return nil
 
 		case ChangeKindNone:
+			if err := ensureIgnoredParentDirs(path); err != nil {
+				return err
+			}
 			appliedChange, err := local.GetPreviousChange(egCtx, path, lowerStat)
 			if err != nil {
 				return err
@@ -419,7 +538,7 @@ func (local *localFS) Sync( //nolint:gocyclo
 				path, doHandle = strings.CutPrefix(path, local.copyPath)
 			}
 			if doHandle {
-				relPathFound = true
+				relPathFound.Store(true)
 				applied := appliedChange.result()
 				if err := cacheCtx.HandleChange(applied.kind, path, applied.stat, nil); err != nil {
 					return fmt.Errorf("failed to handle change in content hasher: %w", err)
@@ -434,12 +553,12 @@ func (local *localFS) Sync( //nolint:gocyclo
 	})
 
 	if err := eg.Wait(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	for _, hardlink := range hardlinks {
 		appliedChange, err := local.Hardlink(ctx, hardlink.kind, hardlink.path, hardlink.upperStat)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		cachedResultsMu.Lock()
 		cachedResults = append(cachedResults, appliedChange)
@@ -452,56 +571,79 @@ func (local *localFS) Sync( //nolint:gocyclo
 			path, doHandle = strings.CutPrefix(path, local.copyPath)
 		}
 		if doHandle {
-			relPathFound = true
+			relPathFound.Store(true)
 			applied := appliedChange.result()
 			if err := cacheCtx.HandleChange(applied.kind, path, applied.stat, nil); err != nil {
-				return nil, fmt.Errorf("failed to handle change in content hasher: %w", err)
+				return nil, "", fmt.Errorf("failed to handle change in content hasher: %w", err)
 			}
 		}
 	}
 
 	if forParents {
 		// we created the parent dirs, nothing else to do now
-		return nil, nil
+		return nil, "", nil
 	}
 
 	ctx, copySpan := Tracer(ctx).Start(ctx, "copy")
 	defer telemetry.EndWithCause(copySpan, &rerr)
 
 	// If we didn't find any files/dir in the given relative path, we can early return an error.
-	if local.copyPath != "" && !relPathFound {
-		return nil, fmt.Errorf("%s: no such file or directory", local.copyPath)
+	if local.copyPath != "" && !relPathFound.Load() {
+		return nil, "", fmt.Errorf("%s: no such file or directory", local.copyPath)
 	}
 
-	dgst, err := cacheCtx.Checksum(ctx, newCopyRef, "/", bkcontenthash.ChecksumOpts{}, session)
+	dgst, err := cacheCtx.Checksum(ctx, newCopyRef, "/", bkcontenthash.ChecksumOpts{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to checksum: %w", err)
+		return nil, "", fmt.Errorf("failed to checksum: %w", err)
 	}
 
 	// If we have already created a cache ref with the same content hash, use that instead of copying
 	// another equivalent one.
-	sis, err := contenthash.SearchContentHash(ctx, cacheManager, dgst)
+	sis, err := bkcontenthash.SearchContentHash(ctx, cacheManager, dgst)
 	if err != nil {
-		return nil, fmt.Errorf("failed to search content hash: %w", err)
+		return nil, "", fmt.Errorf("failed to search content hash: %w", err)
 	}
 	for _, si := range sis {
-		finalRef, err := cacheManager.Get(ctx, si.ID(), nil)
+		finalRef, err := cacheManager.GetBySnapshotID(ctx, si.SnapshotID())
 		if err == nil {
-			bklog.G(ctx).Debugf("reusing copy ref %s", si.ID())
-			return finalRef, nil
+			bklog.G(ctx).Debugf("reusing copy ref %s", si.SnapshotID())
+			return finalRef, dgst, nil
 		} else {
 			bklog.G(ctx).Debugf("failed to get cache ref: %v", err)
 		}
 	}
 
-	copyRefMntable, err := newCopyRef.Mount(ctx, false, session)
+	copyRefMntable, err := newCopyRef.Mount(ctx, false)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get mountable: %w", err)
+		return nil, "", fmt.Errorf("failed to get mountable: %w", err)
 	}
-	copyRefMnter := snapshot.LocalMounter(copyRefMntable)
+	copyRefMounts, copyRefRelease, err := copyRefMntable.Mount()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get mounts: %w", err)
+	}
+	if len(copyRefMounts) == 0 {
+		if copyRefRelease != nil {
+			if err := copyRefRelease(); err != nil {
+				return nil, "", fmt.Errorf("failed to release copy ref mount: %w", err)
+			}
+		}
+		return nil, "", fmt.Errorf("copy ref mountable returned no mounts")
+	}
+	var copyRefReleaseFn func() error
+	if copyRefRelease != nil {
+		copyRefReleaseFn = copyRefRelease
+		defer func() {
+			if copyRefReleaseFn != nil {
+				if err := copyRefReleaseFn(); err != nil {
+					rerr = errors.Join(rerr, fmt.Errorf("failed to release copy ref mount: %w", err))
+				}
+			}
+		}()
+	}
+	copyRefMnter := bkcache.LocalMounterWithMounts(copyRefMounts)
 	copyRefMntPath, err := copyRefMnter.Mount()
 	if err != nil {
-		return nil, fmt.Errorf("failed to mount: %w", err)
+		return nil, "", fmt.Errorf("failed to mount: %w", err)
 	}
 	defer func() {
 		if copyRefMnter != nil {
@@ -511,38 +653,69 @@ func (local *localFS) Sync( //nolint:gocyclo
 		}
 	}()
 
-	copyOpts := []fscopy.Opt{
-		func(ci *fscopy.CopyInfo) {
-			// only copy files that we know about changes for
-			ci.Only = only
-			ci.CopyDirContents = true
-			ci.BaseCopyPath = local.copyPath
-		},
-		fscopy.WithXAttrErrorHandler(func(dst, src, key string, err error) error {
-			bklog.G(ctx).Debugf("xattr error during local import copy: %v", err)
-			return nil
-		}),
+	copier, err := layercopy.NewCopier(layercopy.Mount{
+		Root:  copyRefMntPath,
+		Mount: &copyRefMounts[0],
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create copier: %w", err)
 	}
+	defer func() {
+		if copier != nil {
+			if err := copier.Close(); err != nil {
+				rerr = errors.Join(rerr, fmt.Errorf("failed to close copier: %w", err))
+			}
+		}
+	}()
 
-	if err := fscopy.Copy(ctx,
-		local.rootPath,
-		filepath.Join(local.subdir, local.copyPath),
-		copyRefMntPath, "/",
-		copyOpts...,
+	if err := copier.Copy(ctx,
+		layercopy.Mount{Root: filepath.Join(local.rootPath, local.subdir)},
+		local.copyPath,
+		"/",
+		layercopy.CopyOptions{
+			Filter: layercopy.Filter{
+				// Only copy files that we know about changes for.
+				Only: localCopyOnlyPaths(only, local.copyPath),
+			},
+			DisableXAttrs:          true,
+			CopyDirContents:        true,
+			DisableSourceHardlinks: true,
+			XAttrErrorHandler: func(dst, src, key string, err error) error {
+				if key != "" {
+					bklog.G(ctx).Debugf("xattr %q error during local import copy from %q to %q: %v", key, src, dst, err)
+				} else {
+					bklog.G(ctx).Debugf("xattr error during local import copy from %q to %q: %v", src, dst, err)
+				}
+				return nil
+			},
+		},
 	); err != nil {
-		return nil, fmt.Errorf("failed to copy %q: %w", local.subdir, err)
+		return nil, "", fmt.Errorf("failed to copy %q: %w", local.subdir, err)
 	}
+	if err := copier.Close(); err != nil {
+		copier = nil
+		return nil, "", fmt.Errorf("failed to close copier: %w", err)
+	}
+	copier = nil
 
 	if err := copyRefMnter.Unmount(); err != nil {
 		copyRefMnter = nil
-		return nil, fmt.Errorf("failed to unmount: %w", err)
+		return nil, "", fmt.Errorf("failed to unmount: %w", err)
 	}
 	copyRefMnter = nil
+	if copyRefReleaseFn != nil {
+		if err := copyRefReleaseFn(); err != nil {
+			copyRefReleaseFn = nil
+			return nil, "", fmt.Errorf("failed to release copy ref mount: %w", err)
+		}
+		copyRefReleaseFn = nil
+	}
 
 	finalRef, err := newCopyRef.Commit(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to commit: %w", err)
+		return nil, "", fmt.Errorf("failed to commit: %w", err)
 	}
+	newCopyRef = nil
 	defer func() {
 		if rerr != nil {
 			if finalRef != nil {
@@ -554,45 +727,23 @@ func (local *localFS) Sync( //nolint:gocyclo
 		}
 	}()
 
-	if err := finalRef.Finalize(ctx); err != nil {
-		return nil, fmt.Errorf("failed to finalize: %w", err)
+	finalMD, ok := any(finalRef).(bkcache.RefMetadata)
+	if !ok {
+		return nil, "", fmt.Errorf("final sync metadata: unexpected ref type %T", finalRef)
 	}
 
-	// FIXME: when the ID of the ref given to SetCacheContext is different from the ID of the
-	// ref the cacheCtx was created with, buildkit just stores it in a in-memory LRU that's
-	// only hit by some code paths. This is probably a bug. To coerce it into actually storing
-	// the cacheCtx on finalRef, we have to do this little dance of setting it (so it's in the LRU)
-	// and then getting it+setting again.
-	if err := bkcontenthash.SetCacheContext(ctx, finalRef, cacheCtx); err != nil {
-		return nil, fmt.Errorf("failed to set cache context: %w", err)
-	}
-	cacheCtx, err = bkcontenthash.GetCacheContext(ctx, finalRef)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get cache context: %w", err)
-	}
-	if err := bkcontenthash.SetCacheContext(ctx, finalRef, cacheCtx); err != nil {
-		return nil, fmt.Errorf("failed to set cache context: %w", err)
+	if err := bkcontenthash.SetCacheContext(ctx, finalMD, cacheCtx); err != nil {
+		return nil, "", fmt.Errorf("failed to set cache context: %w", err)
 	}
 
-	if err := (contenthash.CacheRefMetadata{RefMetadata: finalRef}).SetContentHashKey(dgst); err != nil {
-		return nil, fmt.Errorf("failed to set content hash key: %w", err)
+	if err := (bkcontenthash.CacheRefMetadata{RefMetadata: finalMD}).SetContentHashKey(dgst); err != nil {
+		return nil, "", fmt.Errorf("failed to set content hash key: %w", err)
 	}
-	if err := finalRef.SetDescription(fmt.Sprintf("local dir %s (include: %v) (exclude %v)", local.subdir, local.includes, local.excludes)); err != nil {
-		return nil, fmt.Errorf("failed to set description: %w", err)
+	if err := finalMD.SetDescription(fmt.Sprintf("local dir %s (include: %v) (exclude %v)", local.subdir, local.includes, local.excludes)); err != nil {
+		return nil, "", fmt.Errorf("failed to set description: %w", err)
 	}
 
-	if err := finalRef.SetCachePolicyRetain(); err != nil {
-		return nil, fmt.Errorf("failed to set cache policy: %w", err)
-	}
-	// NOTE: this MUST be released after setting cache policy retain or bk cache manager decides to
-	// remove finalRef...
-	if err := newCopyRef.Release(ctx); err != nil {
-		newCopyRef = nil
-		return nil, fmt.Errorf("failed to release: %w", err)
-	}
-	newCopyRef = nil
-
-	return finalRef, nil
+	return finalRef, dgst, nil
 }
 
 // the full absolute path on the local filesystem
@@ -628,7 +779,34 @@ func (local *localFS) GetPreviousChange(ctx context.Context, path string, stat *
 		if isRegular {
 			dgstBytes, err := sysx.Getxattr(fullPath, hashXattrKey)
 			if err != nil {
-				return nil, fmt.Errorf("failed to get content hash xattr: %w", err)
+				if !isMissingContentHashXattr(err) {
+					return nil, fmt.Errorf("failed to get content hash xattr: %w", err)
+				}
+				f, err := os.Open(fullPath)
+				if err != nil {
+					return nil, fmt.Errorf("failed to open file %q for content hash repair: %w", path, err)
+				}
+				defer f.Close()
+
+				h := newHashFromStat(stat)
+				copyBuf := copyBufferPool.Get().(*[]byte)
+				_, err = io.CopyBuffer(h, f, *copyBuf)
+				copyBufferPool.Put(copyBuf)
+				if err != nil {
+					return nil, fmt.Errorf("failed to read file %q for content hash repair: %w", path, err)
+				}
+
+				dgst := digest.NewDigest(hashutil.XXH3, h)
+				if err := sysx.Setxattr(fullPath, hashXattrKey, []byte(dgst.String()), 0); err != nil {
+					return nil, fmt.Errorf("failed to set repaired content hash xattr: %w", err)
+				}
+				return &ChangeWithStat{
+					kind: ChangeKindNone,
+					stat: &HashedStatInfo{
+						StatInfo: StatInfo{stat},
+						dgst:     dgst,
+					},
+				}, nil
 			}
 			return &ChangeWithStat{
 				kind: ChangeKindNone,
@@ -879,10 +1057,6 @@ func (local *localFS) Walk(ctx context.Context, path string, walkFn fs.WalkDirFu
 }
 
 func rewriteMetadata(p string, upperStat *types.Stat) error {
-	for key, value := range upperStat.Xattrs {
-		sysx.Setxattr(p, key, value, 0)
-	}
-
 	if err := os.Lchown(p, int(upperStat.Uid), int(upperStat.Gid)); err != nil {
 		return fmt.Errorf("failed to change owner: %w", err)
 	}

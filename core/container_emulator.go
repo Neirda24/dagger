@@ -5,6 +5,7 @@ package core
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,12 +13,10 @@ import (
 
 	"github.com/containerd/containerd/v2/core/mount"
 	"github.com/containerd/platforms"
-	"github.com/dagger/dagger/engine/buildkit"
-	"github.com/dagger/dagger/internal/buildkit/snapshot"
+	"github.com/dagger/dagger/engine/engineutil"
+	bkcache "github.com/dagger/dagger/engine/snapshots"
 	"github.com/dagger/dagger/internal/buildkit/util/archutil"
 	"github.com/dagger/dagger/internal/buildkit/util/bklog"
-	copy "github.com/dagger/dagger/internal/fsutil/copy"
-	"github.com/docker/docker/pkg/idtools"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 )
@@ -34,21 +33,19 @@ var qemuArchMap = map[string]string{
 }
 
 type emulator struct {
-	path  string
-	idmap *idtools.IdentityMapping
+	path string
 }
 
-func (e *emulator) Mount(ctx context.Context, readonly bool) (snapshot.Mountable, error) {
-	return &staticEmulatorMount{path: e.path, idmap: e.idmap}, nil
+func (e *emulator) Mount(ctx context.Context, readonly bool) (bkcache.MountableRef, error) {
+	return &staticEmulatorMount{path: e.path}, nil
 }
 
 type staticEmulatorMount struct {
-	path  string
-	idmap *idtools.IdentityMapping
+	path string
 }
 
 func (m *staticEmulatorMount) Mount() ([]mount.Mount, func() error, error) {
-	tmpdir, err := os.MkdirTemp("", "buildkit-qemu-emulator")
+	tmpdir, err := os.MkdirTemp("", "dagger-qemu-emulator")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -59,31 +56,43 @@ func (m *staticEmulatorMount) Mount() ([]mount.Mount, func() error, error) {
 		}
 	}()
 
-	var uid, gid int
-	if m.idmap != nil {
-		root := m.idmap.RootPair()
-		uid = root.UID
-		gid = root.GID
-	}
-	if err := copy.Copy(context.TODO(), filepath.Dir(m.path), filepath.Base(m.path), tmpdir, buildkit.BuildkitQemuEmulatorMountPoint, func(ci *copy.CopyInfo) {
-		m := 0555
-		ci.Mode = &m
-	}, copy.WithChown(uid, gid)); err != nil {
+	emulatorPath := filepath.Join(tmpdir, engineutil.DaggerQemuEmulatorMountPoint)
+	if err := copyRegularFile(m.path, emulatorPath, 0o555); err != nil {
 		return nil, nil, err
 	}
 
 	ret = true
 	return []mount.Mount{{
 			Type:    "bind",
-			Source:  filepath.Join(tmpdir, buildkit.BuildkitQemuEmulatorMountPoint),
+			Source:  emulatorPath,
 			Options: []string{"ro", "bind"},
 		}}, func() error {
 			return os.RemoveAll(tmpdir)
 		}, nil
 }
 
-func (m *staticEmulatorMount) IdentityMapping() *idtools.IdentityMapping {
-	return m.idmap
+func copyRegularFile(srcPath, dstPath string, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+		return err
+	}
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	dst, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(dst, src)
+	closeErr := dst.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Chmod(dstPath, mode)
 }
 
 func getEmulator(ctx context.Context, pp ocispecs.Platform) (*emulator, error) {

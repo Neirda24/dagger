@@ -30,6 +30,22 @@ type FunctionArgID = dagql.ID[*FunctionArg]
 
 type TypeDefID = dagql.ID[*TypeDef]
 
+type ListTypeDefID = dagql.ID[*ListTypeDef]
+
+type ObjectTypeDefID = dagql.ID[*ObjectTypeDef]
+
+type InterfaceTypeDefID = dagql.ID[*InterfaceTypeDef]
+
+type InputTypeDefID = dagql.ID[*InputTypeDef]
+
+type ScalarTypeDefID = dagql.ID[*ScalarTypeDef]
+
+type EnumTypeDefID = dagql.ID[*EnumTypeDef]
+
+type FieldTypeDefID = dagql.ID[*FieldTypeDef]
+
+type EnumMemberTypeDefID = dagql.ID[*EnumMemberTypeDef]
+
 type SourceMapID = dagql.ID[*SourceMap]
 
 type GeneratedCodeID = dagql.ID[*GeneratedCode]
@@ -45,3 +61,6 @@ type LLMID = dagql.ID[*LLM]
 type EnvID = dagql.ID[*Env]
 
 type EnvFileID = dagql.ID[*EnvFile]
+
+// ID is an alias for dagql.AnyID — a generic object identifier.
+type ID = dagql.AnyID

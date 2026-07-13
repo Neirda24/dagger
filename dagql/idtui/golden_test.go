@@ -31,25 +31,34 @@ import (
 	telemetry "github.com/dagger/otel-go"
 
 	"github.com/dagger/dagger/dagql/dagui"
+	"github.com/dagger/dagger/dagql/idtui"
 	"github.com/dagger/dagger/engine/slog"
 	"github.com/dagger/dagger/internal/testutil"
 	"github.com/dagger/dagger/util/scrub"
+	"github.com/dagger/otel-go/oteltestctx"
 	"github.com/dagger/testctx"
-	"github.com/dagger/testctx/oteltest"
 )
 
 func TestMain(m *testing.M) {
-	os.Exit(oteltest.Main(m))
+	// The frontend adjusts its output when driven by an AI coding agent
+	// (RunningInAgent): plain "== X ==" headings, the report on stdout, ANSI
+	// stripped. The tests and goldens assert the human form, and the golden
+	// suite passes os.Environ() to the CLIs it spawns -- so running the suite
+	// from inside an agent session would silently flip the output under test.
+	// Scrub the detection variables up front for the whole test binary.
+	for _, name := range idtui.AgentEnvVars {
+		os.Unsetenv(name)
+	}
+	os.Exit(oteltestctx.Main(m))
 }
 
 func Middleware() []testctx.Middleware[*testing.T] {
 	return []testctx.Middleware[*testing.T]{
-		oteltest.WithTracing(
-			oteltest.TraceConfig[*testing.T]{
+		oteltestctx.WithTracing(
+			oteltestctx.TraceConfig[*testing.T]{
 				StartOptions: testutil.SpanOpts[*testing.T],
 			},
 		),
-		oteltest.WithLogging[*testing.T](),
 	}
 }
 
@@ -66,16 +75,30 @@ func TestTelemetry(t *testing.T) {
 func (s TelemetrySuite) TestGolden(ctx context.Context, t *testctx.T) {
 	// setup a git repo so function call tests can pick up the right metadata
 
-	// remove the repo if it exists now too, since the Cleanup doesn't always run, e.g. after a ctrl-C
-	exec.Command("rm", "-rf", ".git").Run()
+	// Remove test-owned workspace files if they exist now too, since Cleanup
+	// doesn't always run, e.g. after a ctrl-C.
+	exec.Command("rm", "-rf", ".git", ".dagger").Run()
 
 	cmd := exec.Command("sh", "-c", "git init && git remote add origin git@github.com:dagger/dagger")
 	if co, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("failed to initialize viztest git repo: %v: (%s)", err, co)
 	}
 
+	// These goldens cover progress rendering, not legacy workspace compat.
+	// Register viztest in a native workspace so local module calls and check
+	// discovery exercise this fixture without falling back to the repository-level
+	// dagger.json and printing migration warnings.
+	if err := os.WriteFile("dagger.toml", []byte(`# Dagger workspace configuration
+
+[modules.viztest]
+source = "./viztest"
+entrypoint = true
+`), 0o644); err != nil {
+		t.Fatalf("failed to initialize viztest workspace config: %v", err)
+	}
+
 	t.Cleanup(func() {
-		exec.Command("rm", "-rf", ".git").Run()
+		exec.Command("rm", "-rf", ".git", ".dagger", "dagger.toml").Run()
 	})
 
 	listDir := t.TempDir()
@@ -111,6 +134,7 @@ func (s TelemetrySuite) TestGolden(ctx context.Context, t *testctx.T) {
 			},
 		},
 		{Function: "use-exec-service"},
+		{Function: "service-error-attribution", Fail: true},
 		{Function: "use-no-exec-service"},
 		{Function: "docker-build", Args: []string{
 			"with-exec", "--args", "echo,hey",
@@ -120,7 +144,18 @@ func (s TelemetrySuite) TestGolden(ctx context.Context, t *testctx.T) {
 			"with-exec", "--args", "echo,hey",
 			"stdout",
 		}, Fail: true},
+		{Function: "module-type-return-fail", Args: []string{"container", "sync"}, Fail: true, FuzzyTest: func(t *testctx.T, out string) {
+			// The module API span owns the returned object's whole construction
+			// closure, so the inner container failure must attribute to it.
+			require.Contains(t, out, "✘ .moduleTypeReturnFail")
+			require.Contains(t, out, "module type container failing")
+			require.Contains(t, out, "✘ withExec sh -c 'echo module type container failing; exit 1'")
+			// Chained calls downstream of the failure never ran; they must stay
+			// pending rather than rendering the cascaded error.
+			require.Contains(t, out, "○ withEnvVariable AFTER=should stay pending")
+		}},
 		{Function: "revealed-spans"},
+		{Function: "partial-progress"},
 
 		{Function: "git-readme", Args: []string{
 			"--remote", "https://github.com/dagger/dagger",
@@ -130,27 +165,6 @@ func (s TelemetrySuite) TestGolden(ctx context.Context, t *testctx.T) {
 			"--remote", "https://github.com/dagger/dagger",
 			"--version", "v0.18.6",
 		}},
-
-		// tests intended to trigger consistent tui exec metrics output
-		{Function: "disk-metrics", Verbosity: 3, FuzzyTest: func(t *testctx.T, out string) {
-			require.NotEmpty(t, out)
-
-			lines := strings.Split(out, "\n")
-			var ddLine string
-			for _, line := range lines {
-				if strings.Contains(line, "dd if=/dev/urandom") {
-					ddLine = line
-					break
-				}
-			}
-
-			require.NotEmpty(t, ddLine, "line containing 'dd if=/dev/urandom' not found")
-			require.Contains(t, ddLine, "| Disk Write: X.X B")
-			require.Contains(t, ddLine, "| Memory Bytes (current): X.X B")
-			require.Contains(t, ddLine, "| Memory Bytes (peak): X.X B")
-
-			// note cpu pressure, io pressure, and network stats are not tested here. they only appear when nonzero.
-		}, Flaky: "Depends on details of the engine runner (e.g. fails in Windows + WSL2)"},
 
 		// test that directly using a broken module surfaces the error
 		{Module: "./viztest/broken-dep/broken", Function: "broken", Fail: true},
@@ -164,13 +178,12 @@ func (s TelemetrySuite) TestGolden(ctx context.Context, t *testctx.T) {
 		{Function: "call-bubbling-dep", Fail: true},
 		{Function: "fail-multi", Fail: true},
 		{Name: "fail-multi-noexpand", Function: "fail-multi", Fail: true, NoExpand: true},
+		{Name: "test-summary-check", Function: "test-summary", Check: true, NoExpand: true},
+		{Name: "test-summary-call", Function: "test-summary", NoExpand: true},
 
-		// FIXME: these constantly fail in CI/Dagger, but not against a local
-		// engine. spent a day investigating, don't have a good explanation. it
-		// fails because despite the warmup running to completion, the test gets a
-		// cache miss.
-		{Function: "cached-execs", Flaky: "nested Dagger causes cache misses"},
-		{Function: "use-cached-exec-service", Flaky: "nested Dagger causes cache misses"},
+		// Used to be marked as flaky
+		{Function: "cached-execs"},
+		{Function: "use-cached-exec-service"},
 
 		// Python SDK tests
 		{Module: "./viztest/python", Function: "pending", Fail: true, RevealNoisySpans: true},
@@ -264,17 +277,22 @@ func (s TelemetrySuite) TestGolden(ctx context.Context, t *testctx.T) {
 		},
 	} {
 		testName := ex.Name
+		goldFile := ex.Name
 		if testName == "" {
 			testName = ex.Function
+			goldFile = ex.Function
 			if ex.Module != "" {
-				testName = path.Join(path.Base(ex.Module), testName)
+				// don't use `/` in testName; it confuses testctx output in dagger telemetry
+				testName = strings.Join([]string{path.Base(ex.Module), ex.Function}, "-")
+				goldFile = path.Join(path.Base(ex.Module), ex.Function)
 			}
 		}
 		t.Run(testName, func(ctx context.Context, t *testctx.T) {
+			goldFile := `TestTelemetry/TestGolden/` + goldFile
 			out, db := ex.Run(ctx, t, s)
 			switch {
 			case ex.Flaky != "":
-				cmp := golden.String(out, t.Name())()
+				cmp := golden.String(out, goldFile)()
 				if !cmp.Success() {
 					t.Log(cmp.(interface{ FailureMessage() string }).FailureMessage())
 					t.Skip("Flaky: " + ex.Flaky)
@@ -282,7 +300,7 @@ func (s TelemetrySuite) TestGolden(ctx context.Context, t *testctx.T) {
 			case ex.FuzzyTest != nil:
 				ex.FuzzyTest(t, out)
 			default:
-				golden.Assert(t, out, t.Name())
+				golden.Assert(t, out, goldFile)
 			}
 			if ex.DBTest != nil {
 				ex.DBTest(t, db)
@@ -308,6 +326,7 @@ type Example struct {
 	Module   string
 	Function string
 	Args     []string
+	Check    bool
 	// verbosities 3 and higher do not work well with golden, they're not very deterministic atm
 	Verbosity int
 	Fail      bool
@@ -336,7 +355,15 @@ func (ex Example) Run(ctx context.Context, t *testctx.T, s TelemetrySuite) (stri
 		daggerBin = bin
 	}
 
-	daggerArgs := []string{"--progress=report", "-v", "call", "-m", ex.Module, ex.Function}
+	var daggerArgs []string
+	if ex.Check {
+		daggerArgs = []string{"--progress=report", "-v", "--workdir", ex.Module, "check"}
+		if ex.Function != "" {
+			daggerArgs = append(daggerArgs, ex.Function)
+		}
+	} else {
+		daggerArgs = []string{"--progress=report", "-v", "call", "-m", ex.Module, ex.Function}
+	}
 	daggerArgs = append(daggerArgs, ex.Args...)
 
 	if ex.Verbosity > 0 {

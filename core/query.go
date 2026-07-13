@@ -5,25 +5,23 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
 
 	"github.com/containerd/containerd/v2/core/content"
-	bkcache "github.com/dagger/dagger/internal/buildkit/cache"
-	bkclient "github.com/dagger/dagger/internal/buildkit/client"
+	bkcache "github.com/dagger/dagger/engine/snapshots"
 	"github.com/dagger/dagger/internal/buildkit/executor/oci"
-	bksession "github.com/dagger/dagger/internal/buildkit/session"
-	"github.com/dagger/dagger/internal/buildkit/util/leaseutil"
 	"github.com/moby/locker"
 	"github.com/vektah/gqlparser/v2/ast"
 
 	"github.com/dagger/dagger/auth"
+	workspacepkg "github.com/dagger/dagger/core/workspace"
 	"github.com/dagger/dagger/dagql"
-	"github.com/dagger/dagger/dagql/call"
 	"github.com/dagger/dagger/engine"
-	"github.com/dagger/dagger/engine/buildkit"
 	engineclient "github.com/dagger/dagger/engine/client"
 	"github.com/dagger/dagger/engine/clientdb"
-	"github.com/dagger/dagger/engine/filesync"
-	"github.com/dagger/dagger/engine/server/resource"
+	"github.com/dagger/dagger/engine/engineutil"
+	serverresolver "github.com/dagger/dagger/engine/server/resolver"
+	"google.golang.org/grpc"
 )
 
 // Query forms the root of the DAG and houses all necessary state and
@@ -31,33 +29,45 @@ import (
 type Query struct {
 	Server
 
-	// An Env value propagated to a module function call, i.e. from LLM.
-	CurrentEnv *call.ID
-
 	// ConstructorArgs stores arguments to pass to the entrypoint module's
 	// constructor. Set by the `with` field on Query so that entrypoint
 	// proxy resolvers can forward them to the constructor.
 	ConstructorArgs map[string]dagql.Input
+
+	cacheVolumeStoreMu sync.Mutex
+	cacheVolumeStore   *cacheVolumeStore
 }
 
-var ErrNoCurrentModule = fmt.Errorf("no current module")
+var (
+	ErrNoCurrentModule    = fmt.Errorf("no current module")
+	ErrNoCurrentWorkspace = fmt.Errorf("no current workspace")
+)
+
+type SpecificClientAttachableConnOpts struct {
+	// IfAvailable returns ok=false instead of waiting when the client currently
+	// has no active session attachables.
+	IfAvailable bool
+}
 
 // APIs from the server+session+client that are needed by core APIs
 type Server interface {
 	// Handle an HTTP request from a nested Dagger client.
-	ServeHTTPToNestedClient(http.ResponseWriter, *http.Request, *buildkit.ExecutionMetadata)
+	ServeHTTPToNestedClient(http.ResponseWriter, *http.Request, *engine.ClientMetadata, string, bool, dagql.AnyObjectResult, dagql.Typed, dagql.AnyObjectResult)
 
 	// Stitch in the given module to the list being served to the current client
-	ServeModule(ctx context.Context, mod *Module, includeDependencies bool, entrypoint bool) error
+	ServeModule(ctx context.Context, mod dagql.ObjectResult[*Module], includeDependencies bool, entrypoint bool) error
 
 	// If the current client is coming from a function, return the module that function is from
-	CurrentModule(context.Context) (*Module, error)
+	CurrentModule(context.Context) (dagql.ObjectResult[*Module], error)
 
 	// If the current client is a module client or a client created by a module function, returns that module.
-	ModuleParent(context.Context) (*Module, error)
+	ModuleParent(context.Context) (dagql.ObjectResult[*Module], error)
 
 	// If the current client is coming from a function, return the function call metadata
 	CurrentFunctionCall(context.Context) (*FunctionCall, error)
+
+	// If the current client is bound to an environment, return that environment.
+	CurrentEnv(context.Context) (dagql.ObjectResult[*Env], error)
 
 	// Return the modules being served to the current client
 	CurrentServedDeps(context.Context) (*SchemaBuilder, error)
@@ -77,6 +87,18 @@ type Server interface {
 	// The cached workspace result from ensureWorkspaceLoaded.
 	CurrentWorkspace(context.Context) (*Workspace, error)
 
+	// Load pending workspace modules on demand; include narrows to the modules
+	// its patterns name ("module" or "module:item"), empty or unrecognized
+	// loads all.
+	EnsureWorkspaceModules(ctx context.Context, include []string) error
+
+	// A snapshot of the current workspace lockfile for ambient live locking.
+	// Returns ok=false when lock-backed workspace access is unavailable.
+	CurrentWorkspaceLock(context.Context) (*workspacepkg.Lock, bool, error)
+
+	// Stage a lockfile lookup result for the current workspace's live lock state.
+	SetCurrentWorkspaceLookup(context.Context, string, string, []any, workspacepkg.LookupResult) error
+
 	// The Client metadata of a specific client ID within the same session as the
 	// current client.
 	SpecificClientMetadata(context.Context, string) (*engine.ClientMetadata, error)
@@ -84,8 +106,8 @@ type Server interface {
 	// The default deps of every user module (currently just core)
 	DefaultDeps(context.Context) (*SchemaBuilder, error)
 
-	// The DagQL query cache for the current client's session
-	Cache(context.Context) (*dagql.SessionCache, error)
+	// The telemetry seen-key store for the current client's session.
+	TelemetrySeenKeyStore(context.Context) (dagql.TelemetrySeenKeyStore, error)
 
 	// The DagQL server for the current client's session
 	Server(context.Context) (*dagql.Server, error)
@@ -93,22 +115,19 @@ type Server interface {
 	// Mix in this http endpoint+handler to the current client's session
 	MuxEndpoint(context.Context, string, http.Handler) error
 
-	// The secret store for the current client
-	Secrets(context.Context) (*SecretStore, error)
-
-	// The socket store for the current client
-	Sockets(context.Context) (*SocketStore, error)
-
-	// Add client-isolated resources like secrets, sockets, etc. to the current client's session based
-	// on anything embedded in the given ID. skipTopLevel, if true, will result in the leaf selection
-	// of the ID to be skipped when walking the ID to find these resources.
-	AddClientResourcesFromID(ctx context.Context, id *resource.ID, sourceClientID string, skipTopLevel bool) error
+	// The session attachables connection for a specific client ID within the
+	// same session as the current client. Returns ok=false only when
+	// opts.IfAvailable is set and the client has no active session attachables.
+	SpecificClientAttachableConn(context.Context, string, SpecificClientAttachableConnOpts) (*grpc.ClientConn, bool, error)
 
 	// The auth provider for the current client
 	Auth(context.Context) (*auth.RegistryAuthProvider, error)
 
-	// The buildkit APIs for the current client
-	Buildkit(context.Context) (*buildkit.Client, error)
+	// The engine utility client for the current client
+	Engine(context.Context) (*engineutil.Client, error)
+
+	// The session-owned registry resolver for the current client.
+	RegistryResolver(context.Context) (*serverresolver.Resolver, error)
 
 	// The services for the current client's session
 	Services(context.Context) (*Services, error)
@@ -119,11 +138,14 @@ type Server interface {
 	// The content store for the engine as a whole
 	OCIStore() content.Store
 
+	// The builtin engine OCI source store.
+	BuiltinOCIStore() content.Store
+
 	// The dns configuration for the engine as a whole
 	DNS() *oci.DNSConfig
 
 	// The lease manager for the engine as a whole
-	LeaseManager() *leaseutil.Manager
+	LeaseManager() *bkcache.LeaseManager
 
 	// Return all the cache entries in the local cache. No support for filtering yet.
 	EngineLocalCacheEntries(context.Context) (*EngineCacheEntrySet, error)
@@ -134,16 +156,10 @@ type Server interface {
 	PruneEngineLocalCacheEntries(context.Context, EngineCachePruneOptions) (*EngineCacheEntrySet, error)
 
 	// The default local cache policy to use for automatic local cache GC.
-	EngineLocalCachePolicy() *bkclient.PruneInfo
+	EngineLocalCachePolicy() *dagql.CachePrunePolicy
 
-	// Gets the buildkit cache manager
-	BuildkitCache() bkcache.Manager
-
-	// Gets the buildkit session manager
-	BuildkitSession() *bksession.Manager
-
-	// Gets the local source
-	FileSyncer() *filesync.FileSyncer
+	// Gets the engine snapshot manager.
+	SnapshotManager() bkcache.SnapshotManager
 
 	// A global lock for the engine, can be used to synchronize access to
 	// shared resources between multiple potentially concurrent calls.
@@ -198,6 +214,13 @@ func CurrentQuery(ctx context.Context) (*Query, error) {
 }
 
 func CurrentDagqlServer(ctx context.Context) (*dagql.Server, error) {
+	// Prefer the dagql server explicitly attached to this resolver context.
+	// This is required for dynamic schemas (e.g. SDKs implemented as modules)
+	// that run selections against a server different from the session's default.
+	if srv := dagql.CurrentDagqlServer(ctx); srv != nil {
+		return srv, nil
+	}
+
 	q, err := CurrentQuery(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("current query: %w", err)
@@ -209,20 +232,8 @@ func CurrentDagqlServer(ctx context.Context) (*dagql.Server, error) {
 	return srv, nil
 }
 
-func CurrentDagqlCache(ctx context.Context) (*dagql.SessionCache, error) {
-	q, err := CurrentQuery(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("current query: %w", err)
-	}
-	cache, err := q.Cache(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("query cache: %w", err)
-	}
-	return cache, nil
-}
-
-func NewRoot(srv Server, envID *call.ID) *Query {
-	return &Query{Server: srv, CurrentEnv: envID}
+func NewRoot(srv Server) *Query {
+	return &Query{Server: srv}
 }
 
 func (*Query) Type() *ast.Type {
@@ -236,15 +247,22 @@ func (*Query) TypeDescription() string {
 	return "The root of the DAG."
 }
 
-func (q Query) Clone() *Query {
-	cp := q
+func (q *Query) Clone() *Query {
+	cp := &Query{
+		Server: q.Server,
+	}
 	if q.ConstructorArgs != nil {
 		cp.ConstructorArgs = make(map[string]dagql.Input, len(q.ConstructorArgs))
 		for k, v := range q.ConstructorArgs {
 			cp.ConstructorArgs[k] = v
 		}
 	}
-	return &cp
+
+	q.cacheVolumeStoreMu.Lock()
+	cp.cacheVolumeStore = q.cacheVolumeStore
+	q.cacheVolumeStoreMu.Unlock()
+
+	return cp
 }
 
 func (q *Query) WithPipeline(name, desc string) *Query {
@@ -256,30 +274,75 @@ func (q *Query) NewHost() *Host {
 }
 
 func (q *Query) NewModule() *Module {
-	return &Module{}
+	return &Module{
+		Deps: NewSchemaBuilder(q, nil),
+	}
 }
 
-// IDDeps loads the module dependencies of a given ID.
-//
-// The returned ModDeps extends the inner DefaultDeps with all modules found in
-// the ID, loaded by using the DefaultDeps schema.
-func (q *Query) IDDeps(ctx context.Context, id *call.ID) (*SchemaBuilder, error) {
+// ModDepsForCall loads the module dependencies referenced by the given result call.
+func (q *Query) ModDepsForCall(ctx context.Context, rootCall *dagql.ResultCall) (*SchemaBuilder, error) {
 	defaultDeps, err := q.DefaultDeps(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("default deps: %w", err)
 	}
-
-	bootstrap, err := defaultDeps.Server(ctx)
+	dag, err := CurrentDagqlServer(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap schema: %w", err)
 	}
+
 	deps := defaultDeps
-	for _, modID := range id.Modules() {
-		inst, err := GetModuleFromContentDigest(ctx, bootstrap, modID.Name(), string(modID.ID().Digest()))
-		if err != nil {
-			return nil, err
+	seenModuleResultIDs := map[uint64]struct{}{}
+
+	appendModule := func(inst dagql.ObjectResult[*Module]) error {
+		if inst.Self() == nil {
+			return nil
 		}
-		deps = deps.Append(inst.Self())
+		if !inst.Self().Source.Valid {
+			// Bare dag.module() builder shells are intermediate construction results,
+			// not source-backed dependency modules to install into a schema.
+			return nil
+		}
+		instID, err := inst.ID()
+		if err != nil {
+			return fmt.Errorf("module %q handle ID: %w", inst.Self().Name(), err)
+		}
+		if instID == nil || instID.EngineResultID() == 0 {
+			return fmt.Errorf("module %q is not attached", inst.Self().Name())
+		}
+		if _, seen := seenModuleResultIDs[instID.EngineResultID()]; seen {
+			return nil
+		}
+		seenModuleResultIDs[instID.EngineResultID()] = struct{}{}
+		deps = deps.Append(NewUserMod(inst))
+		return nil
+	}
+
+	cache, err := dagql.EngineCache(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("engine cache: %w", err)
+	}
+	clientMetadata, err := engine.ClientMetadataFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("current client metadata: %w", err)
+	}
+	if clientMetadata.SessionID == "" {
+		return nil, fmt.Errorf("empty session ID")
+	}
+	if err := cache.WalkResultCall(rootCall, func(ref *dagql.ResultCallRef, frame *dagql.ResultCall) error {
+		if ref == nil || ref.ResultID == 0 || frame == nil || frame.Type == nil || frame.Type.NamedType != "Module" {
+			return nil
+		}
+		res, err := cache.LoadResultByResultID(ctx, clientMetadata.SessionID, dag, ref.ResultID)
+		if err != nil {
+			return fmt.Errorf("load module result %d: %w", ref.ResultID, err)
+		}
+		modInst, ok := res.(dagql.ObjectResult[*Module])
+		if !ok {
+			return fmt.Errorf("result %d is %T, not module result", ref.ResultID, res)
+		}
+		return appendModule(modInst)
+	}); err != nil {
+		return nil, err
 	}
 	return deps, nil
 }

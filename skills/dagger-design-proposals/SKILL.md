@@ -10,16 +10,18 @@ Guidelines for writing design proposals for Dagger features.
 ## Before Writing
 
 **Always research first:**
-1. Check existing skills (dagger-codegen, cache-expert, etc.) for relevant context
+
+1. Check relevant internal docs, such as `internal-docs/dagger-codegen.md`, for context
 2. Look at related code in the Dagger codebase:
    - GraphQL schema: `core/schema/*.go`
    - CLI commands: `cmd/dagger/*.go`
    - Core types: `core/*.go`
-3. Understand existing patterns before proposing new ones
+3. For public API or workspace proposals, read `internal-docs/version-gating.md`
+4. Understand existing patterns before proposing new ones
 
 ## Structure
 
-```markdown
+````markdown
 # Part N: Title
 
 *Builds on [Part N-1: Title](link)*
@@ -81,7 +83,8 @@ One line.
 
 - Previous: [Part N-1](link)
 - Next: [Part N+1](link) or "Part N+1: Title (coming soon)"
-```
+
+````
 
 ## Style
 
@@ -111,6 +114,7 @@ One line.
 ## Iterating with User
 
 When you have clarifying questions or notes:
+
 1. **List them first** - Present a high-level numbered list of all questions/notes
 2. **One at a time** - Walk through each item individually, waiting for user response
 3. **Don't dump** - Never present all questions with full details at once
@@ -125,9 +129,11 @@ When writing proposals, reference actual Dagger code:
 | CLI commands | `cmd/dagger/*.go` |
 | Core types (Directory, File, etc.) | `core/*.go` |
 | Engine internals | `engine/*.go` |
-| SDK codegen | `cmd/codegen/*.go` |
+| SDK codegen | `internal-docs/dagger-codegen.md`, `cmd/codegen/*.go` |
+| API version gates | `internal-docs/version-gating.md`, `core/schema/*.go` |
 
 Example: To understand how `Host.findUp` works before proposing `Workspace.findUp`:
+
 ```bash
 # Find the schema definition
 grep -r "findUp" core/schema/host.go
@@ -156,5 +162,8 @@ gh api --method POST /gists/GIST_ID/comments -f body="## Changelog
 ## Related Skills
 
 Check for other Dagger skills that may help with research:
-- `dagger-codegen` - SDK codegen, templates, bindings
-- `cache-expert` - Caching internals, invalidation
+
+- `engine-debugging` - Engine debugging workflows, trace replay, cache snapshots
+- `internal-docs/dagger-codegen.md` - SDK codegen, templates, bindings
+- `internal-docs/version-gating.md` - schema views and public API version gates
+- `internal-docs/` - Cache and engine implementation references
